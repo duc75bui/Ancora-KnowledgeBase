@@ -69,8 +69,8 @@ def main() -> None:
     if not api_key:
         st.subheader("Ask")
         st.info(
-            "Connect a Gemini API key in the sidebar to start asking. Admin login is only "
-            "needed to save a server key or manage stores, uploads, and documents."
+            "A shared Gemini API key is not configured yet. Ask an admin to log in and "
+            "save the key once; after that, users can ask without admin login."
         )
         render_admin_controls()
         return
@@ -144,20 +144,30 @@ def render_api_key_controls(
     if session_api_key:
         st.sidebar.text_input("Gemini API key", value=mask_secret(session_api_key), disabled=True)
         st.sidebar.success("Connected for this browser session")
-        change_label = "Change API key" if is_admin else "Change session API key"
-        if st.sidebar.button(change_label):
-            st.session_state.session_api_key = None
-            cached_client.clear()
-            st.rerun()
+        if is_admin:
+            if st.sidebar.button("Save key on this server"):
+                try:
+                    save_persisted_api_key(session_api_key)
+                except ValueError as exc:
+                    st.sidebar.error(str(exc))
+                    return session_api_key
+                cached_client.clear()
+                st.rerun()
+            if st.sidebar.button("Change API key"):
+                st.session_state.session_api_key = None
+                cached_client.clear()
+                st.rerun()
         return session_api_key
 
+    if not is_admin:
+        st.sidebar.warning("No shared API key is configured.")
+        st.sidebar.caption("Admin login is required once to save the Gemini API key for all users.")
+        return None
+
     entered = st.sidebar.text_input("Gemini API key", type="password")
-    remember_key = False
-    if is_admin:
-        remember_key = st.sidebar.checkbox("Remember API key on this server", value=True)
-    connect_label = "Connect API key" if is_admin else "Connect for this session"
-    if st.sidebar.button(connect_label, disabled=not entered):
-        if remember_key:
+    save_key = st.sidebar.checkbox("Save API key on this server", value=True)
+    if st.sidebar.button("Connect API key", disabled=not entered):
+        if save_key:
             try:
                 save_persisted_api_key(entered)
             except ValueError as exc:
@@ -166,8 +176,6 @@ def render_api_key_controls(
         st.session_state.session_api_key = entered.strip()
         cached_client.clear()
         st.rerun()
-    if not is_admin:
-        st.sidebar.caption("This key is used only for your browser session. Admin login is required to save a shared server key.")
     return None
 
 

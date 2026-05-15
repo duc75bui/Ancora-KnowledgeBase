@@ -1,4 +1,4 @@
-# ancoraDocs KnowledgeBase v2.10
+# ancoraDocs KnowledgeBase v2.11
 
 This is a basic local Streamlit app for Retrieval Augmented Generation with the Google Gemini File Search API. It uses Google File Search stores as the source of truth: Google imports files, chunks them, creates embeddings, indexes content, retrieves relevant chunks, returns grounding metadata, and manages File Search documents.
 
@@ -36,7 +36,7 @@ GEMINI_API_KEY=your-gemini-api-key
 ADMIN_PASSWORD=admin123
 ```
 
-You can also leave `.env` unset and connect a key in the Streamlit sidebar. Regular users can connect a temporary browser-session key to ask questions. Admins can choose to save a shared server key locally in `.app_config/secrets.json` so it survives app/browser restarts. The app never hardcodes or prints the full API key.
+You can also leave `.env` unset and have an admin save a shared key in the Streamlit sidebar. The app saves that key locally in `.app_config/secrets.json` so it survives app/browser restarts. Regular users can ask without admin login after the shared key is configured. The app never hardcodes or prints the full API key.
 
 `ADMIN_PASSWORD` controls access to locally archived original files. The default `admin123` is only for local testing.
 
@@ -63,7 +63,7 @@ Fix it by creating or selecting a Gemini API key in Google AI Studio, or by edit
 ## What The App Does
 
 - Loads `GEMINI_API_KEY` from `.env` or accepts a key in the UI.
-- Regular users can connect a temporary browser-session Gemini API key and start asking without admin login when no server key is configured.
+- Regular users can ask without admin login when a shared `.env` or locally saved Gemini API key is configured.
 - Admin users can save or change the shared server Gemini API key when it is not loaded from `.env`; connected keys are masked and disabled in the sidebar.
 - Lets users choose a File Search-supported Gemini model.
 - Admins can refresh Gemini models from the Models API and approve additional model IDs for the picker.
