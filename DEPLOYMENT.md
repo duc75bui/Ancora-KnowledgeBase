@@ -1,4 +1,4 @@
-# ancoraDocs KnowledgeBase v2.19 Deployment Guide
+# ancoraDocs KnowledgeBase v2.20 Deployment Guide
 
 This guide is for deploying the local Streamlit app on a Windows server or internal workstation.
 
@@ -11,6 +11,7 @@ The app is a Python Streamlit service that talks to Google Gemini File Search th
 - Outbound HTTPS access to `generativelanguage.googleapis.com`.
 - A Gemini API key allowed to call the Generative Language API / Gemini API.
 - A local service account or domain account to run the app.
+- PyMuPDF is installed from `requirements.lock.txt` and is used to render cited PDF pages inside the app.
 - Optional but recommended: reverse proxy with HTTPS and real authentication.
 
 ## 2. Application Folder
@@ -264,3 +265,4 @@ Users cannot open cited source previews:
 - Non-admin users can only open cited PDF previews from Ask; admin login is required for downloads, archive browsing, and non-PDF local source viewing.
 - The file must have been uploaded through this app after local source archiving was added.
 - `.source_files\` must still contain the archive entry.
+- If the source panel appears but the page is blank, reinstall dependencies from `requirements.lock.txt` so PyMuPDF is available, then restart Streamlit.

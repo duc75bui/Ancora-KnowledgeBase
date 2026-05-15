@@ -187,13 +187,12 @@ def _source_view_link_html(citation: Citation, source_view_links: dict[str, str]
         link = source_view_links.get(citation.title)
     if not link:
         return ""
-    label = "Open local PDF"
+    label = "Show PDF in source panel"
     if citation.page_number is not None:
-        label = f"Open local PDF at page {citation.page_number}"
+        label = f"Show page {citation.page_number} in source panel"
     return (
         '<a class="tooltip-source-link" '
         f'href="{html.escape(link, quote=True)}" '
-        'target="_self">'
         f"{html.escape(label)}"
         "</a>"
     )

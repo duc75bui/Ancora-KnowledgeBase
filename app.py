@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import base64
+import uuid
 from typing import Any
 from urllib.parse import urlencode
 
@@ -43,6 +43,7 @@ from src.metadata import (
     parse_metadata_lines,
 )
 from src.model_manager import ModelInfo, ModelManager, ModelManagerError, default_model_from
+from src.pdf_preview import PDFPreviewError, render_pdf_page_png
 from src.qa_engine import ANSWER_STYLE_INSTRUCTIONS, DEFAULT_ANSWER_STYLE, QAEngine, QueryImage
 from src.source_registry import (
     SourceRecord,
@@ -56,10 +57,23 @@ from src.validation import accepted_extensions, safe_display_name, validate_file
 
 st.set_page_config(page_title=APP_NAME, page_icon="G", layout="wide")
 
+LAST_ASK_RESULT_KEY = "last_ask_result"
+
 
 @st.cache_resource(show_spinner=False)
 def cached_client(api_key: str):
     return create_client(api_key)
+
+
+@st.cache_data(show_spinner=False)
+def cached_pdf_page_preview(data: bytes, page_number: int | None) -> tuple[int, int, bytes]:
+    preview = render_pdf_page_png(data, page_number=page_number)
+    return preview.page_number, preview.page_count, preview.png_bytes
+
+
+@st.cache_resource(show_spinner=False)
+def answer_state_cache() -> dict[str, dict[str, Any]]:
+    return {}
 
 
 def main() -> None:
@@ -99,31 +113,8 @@ def main() -> None:
 
     stores = load_stores(file_search)
     selected_store_name = render_store_selector(stores, is_admin=is_admin)
-    if has_selected_source_viewer():
-        answer_col, source_col = st.columns([0.56, 0.44], gap="large")
-        with answer_col:
-            render_ask_tab(
-                qa_engine,
-                file_search,
-                source_registry,
-                model,
-                selected_store_name,
-                is_admin,
-            )
-            if is_admin:
-                render_admin_panel(
-                    file_search=file_search,
-                    upload_manager=upload_manager,
-                    source_registry=source_registry,
-                    model_manager=model_manager,
-                    approved_models=approved_models,
-                    stores=stores,
-                    selected_store_name=selected_store_name,
-                    api_key=api_key,
-                )
-        with source_col:
-            render_selected_source_viewer(source_registry, selected_store_name, is_admin)
-    else:
+    answer_col, source_col = st.columns([0.58, 0.42], gap="large")
+    with answer_col:
         render_ask_tab(
             qa_engine,
             file_search,
@@ -143,6 +134,8 @@ def main() -> None:
                 selected_store_name=selected_store_name,
                 api_key=api_key,
             )
+    with source_col:
+        render_selected_source_viewer(source_registry, selected_store_name, is_admin)
     render_admin_controls()
 
 
@@ -255,10 +248,6 @@ def render_admin_controls() -> bool:
         else:
             st.sidebar.error("Incorrect admin password")
     return bool(st.session_state.is_admin)
-
-
-def has_selected_source_viewer() -> bool:
-    return bool(_query_param_value(st.query_params.get("source_id")))
 
 
 def load_stores(file_search: FileSearchManager) -> list[Any]:
@@ -569,9 +558,10 @@ def render_ask_tab(
     is_admin: bool,
 ) -> None:
     st.subheader("Ask")
+    restore_answer_state_from_query_params()
 
     with st.form("ask-form"):
-        question = st.text_area("Question", height=120)
+        question = st.text_area("Question", height=120, key="ask_question")
         query_image_files = st.file_uploader(
             "Optional image context",
             type=["png", "jpg", "jpeg", "webp", "heic", "heif"],
@@ -612,140 +602,265 @@ def render_ask_tab(
         submitted = st.form_submit_button("Ask")
 
     if submitted:
-        query_images = build_query_images(query_image_files or [])
-        if query_images is None:
-            return
-
-        if not use_web and not selected_store_name:
-            st.error("Select or create a File Search store, or enable web answers for a generic web question.")
-            return
-        metadata_filter = None
-        if not use_web:
-            filter_result = build_simple_metadata_filter(
-                filter_key,
-                filter_operator,
-                filter_value,
-                filter_value_type,
-                advanced_metadata_filter,
-            )
-            if filter_result.errors:
-                st.error("; ".join(filter_result.errors))
-                return
-            metadata_filter = metadata_filter_value(filter_result)
-
-        with st.spinner("Querying File Search"):
-            try:
-                if use_web:
-                    result = qa_engine.answer_web(
-                        question=question,
-                        model=model,
-                        query_images=query_images,
-                        answer_style=answer_style,
-                    )
-                else:
-                    result = qa_engine.answer(
-                        question=question,
-                        model=model,
-                        file_search_store_name=selected_store_name or "",
-                        metadata_filter=metadata_filter,
-                        top_k=int(top_k) if top_k else None,
-                        query_images=query_images,
-                        answer_style=answer_style,
-                    )
-            except (ValueError, GeminiAPIError) as exc:
-                st.error(str(exc))
-                return
-
-        initial_result = None
-        if reverify_answer and not use_web:
-            initial_result = result
-            with st.spinner("Reviewing answer against the selected File Search store"):
-                try:
-                    result = qa_engine.reverify_answer(
-                        question=question,
-                        draft_answer=initial_result.text,
-                        model=model,
-                        file_search_store_name=selected_store_name or "",
-                        metadata_filter=metadata_filter,
-                        top_k=int(top_k) if top_k else None,
-                        query_images=query_images,
-                        answer_style=answer_style,
-                    )
-                    result = type(result)(
-                        text=result.text,
-                        grounding=supplement_missing_citation_details(
-                            result.grounding,
-                            initial_result.grounding,
-                            allow_index_fallback=True,
-                        ),
-                        raw_response=result.raw_response,
-                    )
-                except (ValueError, GeminiAPIError) as exc:
-                    st.warning(f"Review pass failed; showing the initial answer. {exc}")
-                    result = initial_result
-
-        st.markdown("### Answer")
-        st.caption("Source mode: Google Search grounding" if use_web else "Source mode: selected File Search store")
-        if metadata_filter:
-            st.caption(f"Metadata filter: `{metadata_filter}`")
-        if initial_result:
-            st.caption("Review pass: second File Search reanalysis was enabled.")
-        if query_images:
-            st.caption(f"Used {len(query_images)} uploaded image(s) as question context.")
-        media_data_urls = {}
-        source_image_data_urls = {}
-        source_citations = combined_source_citations(
-            result.grounding.citations,
-            initial_result.grounding.citations if initial_result else [],
-        )
-        source_view_links = citation_source_view_links(
-            source_registry,
-            source_citations,
-            file_search_store_name=selected_store_name,
-        )
-        image_preview_notes = image_preview_notes_for_citations(
-            result.grounding.citations,
+        answer_state = run_ask_query(
+            qa_engine=qa_engine,
+            file_search=file_search,
+            source_registry=source_registry,
+            question=question,
+            model=model,
+            selected_store_name=selected_store_name,
+            use_web=use_web,
+            answer_style=answer_style,
+            query_image_files=query_image_files or [],
+            filter_key=filter_key,
+            filter_operator=filter_operator,
+            filter_value=filter_value,
+            filter_value_type=filter_value_type,
+            advanced_metadata_filter=advanced_metadata_filter,
+            top_k=int(top_k) if top_k else None,
+            reverify_answer=reverify_answer,
+            include_media_previews=include_media_previews,
             is_admin=is_admin,
         )
-        if include_media_previews:
-            media_data_urls, media_notes = citation_media_data_urls(
-                file_search,
-                result.grounding.citations,
-            )
-            image_preview_notes.update(media_notes)
-            source_image_data_urls = citation_source_image_data_urls(
-                source_registry,
-                result.grounding.citations,
-                file_search_store_name=selected_store_name,
-                is_admin=is_admin,
-            )
-        if result.text:
-            rendered = render_answer_with_hover(
-                result.text,
-                result.grounding,
-                media_data_urls=media_data_urls,
-                source_image_data_urls=source_image_data_urls,
-                image_preview_notes=image_preview_notes,
-                source_view_links=source_view_links,
-            )
-            st.markdown(rendered.html, unsafe_allow_html=True)
-        else:
-            st.markdown("_No text returned._")
-        render_citation_pdf_open_buttons(
-            source_registry,
-            source_citations,
-            file_search_store_name=selected_store_name,
+        if answer_state is not None:
+            remember_answer_state(answer_state)
+
+    answer_state = st.session_state.get(LAST_ASK_RESULT_KEY)
+    if answer_state:
+        render_answer_state(
+            file_search=file_search,
+            source_registry=source_registry,
+            answer_state=answer_state,
+            is_admin=is_admin,
         )
-        if initial_result:
-            with st.expander("Initial answer before review"):
-                st.markdown(initial_result.text or "_No text returned._")
-                st.json(initial_result.grounding.raw_grounding_metadata or {})
-        render_citations(file_search, source_registry, result.grounding.citations, is_admin)
-        render_search_entry_point(result.raw_response)
-        with st.expander("Raw grounding metadata"):
-            st.json(result.grounding.raw_grounding_metadata or {})
-        with st.expander("Raw response"):
-            st.json(to_plain_data(result.raw_response))
+
+
+def run_ask_query(
+    qa_engine: QAEngine,
+    file_search: FileSearchManager,
+    source_registry: SourceRegistry,
+    question: str,
+    model: str,
+    selected_store_name: str | None,
+    use_web: bool,
+    answer_style: str,
+    query_image_files: list[Any],
+    filter_key: str,
+    filter_operator: str,
+    filter_value: str,
+    filter_value_type: str,
+    advanced_metadata_filter: str,
+    top_k: int | None,
+    reverify_answer: bool,
+    include_media_previews: bool,
+    is_admin: bool,
+) -> dict[str, Any] | None:
+    answer_id = uuid.uuid4().hex
+    query_images = build_query_images(query_image_files)
+    if query_images is None:
+        return None
+
+    if not use_web and not selected_store_name:
+        st.error("Select or create a File Search store, or enable web answers for a generic web question.")
+        return None
+    metadata_filter = None
+    if not use_web:
+        filter_result = build_simple_metadata_filter(
+            filter_key,
+            filter_operator,
+            filter_value,
+            filter_value_type,
+            advanced_metadata_filter,
+        )
+        if filter_result.errors:
+            st.error("; ".join(filter_result.errors))
+            return None
+        metadata_filter = metadata_filter_value(filter_result)
+
+    with st.spinner("Querying File Search"):
+        try:
+            if use_web:
+                result = qa_engine.answer_web(
+                    question=question,
+                    model=model,
+                    query_images=query_images,
+                    answer_style=answer_style,
+                )
+            else:
+                result = qa_engine.answer(
+                    question=question,
+                    model=model,
+                    file_search_store_name=selected_store_name or "",
+                    metadata_filter=metadata_filter,
+                    top_k=top_k,
+                    query_images=query_images,
+                    answer_style=answer_style,
+                )
+        except (ValueError, GeminiAPIError) as exc:
+            st.error(str(exc))
+            return None
+
+    initial_result = None
+    if reverify_answer and not use_web:
+        initial_result = result
+        with st.spinner("Reviewing answer against the selected File Search store"):
+            try:
+                result = qa_engine.reverify_answer(
+                    question=question,
+                    draft_answer=initial_result.text,
+                    model=model,
+                    file_search_store_name=selected_store_name or "",
+                    metadata_filter=metadata_filter,
+                    top_k=top_k,
+                    query_images=query_images,
+                    answer_style=answer_style,
+                )
+                result = type(result)(
+                    text=result.text,
+                    grounding=supplement_missing_citation_details(
+                        result.grounding,
+                        initial_result.grounding,
+                        allow_index_fallback=True,
+                    ),
+                    raw_response=result.raw_response,
+                )
+            except (ValueError, GeminiAPIError) as exc:
+                st.warning(f"Review pass failed; showing the initial answer. {exc}")
+                result = initial_result
+
+    source_citations = combined_source_citations(
+        result.grounding.citations,
+        initial_result.grounding.citations if initial_result else [],
+    )
+    source_view_links = citation_source_view_links(
+        source_registry,
+        source_citations,
+        file_search_store_name=selected_store_name,
+        answer_id=answer_id,
+    )
+    image_preview_notes = image_preview_notes_for_citations(
+        result.grounding.citations,
+        is_admin=is_admin,
+    )
+    media_data_urls = {}
+    source_image_data_urls = {}
+    if include_media_previews:
+        media_data_urls, media_notes = citation_media_data_urls(
+            file_search,
+            result.grounding.citations,
+        )
+        image_preview_notes.update(media_notes)
+        source_image_data_urls = citation_source_image_data_urls(
+            source_registry,
+            result.grounding.citations,
+            file_search_store_name=selected_store_name,
+            is_admin=is_admin,
+        )
+
+    return {
+        "question": question,
+        "answer_id": answer_id,
+        "result": result,
+        "initial_result": initial_result,
+        "metadata_filter": metadata_filter,
+        "use_web": use_web,
+        "query_image_count": len(query_images),
+        "source_citations": source_citations,
+        "source_view_links": source_view_links,
+        "image_preview_notes": image_preview_notes,
+        "media_data_urls": media_data_urls,
+        "source_image_data_urls": source_image_data_urls,
+        "selected_store_name": selected_store_name,
+    }
+
+
+def render_answer_state(
+    file_search: FileSearchManager,
+    source_registry: SourceRegistry,
+    answer_state: dict[str, Any],
+    is_admin: bool,
+) -> None:
+    result = answer_state["result"]
+    initial_result = answer_state.get("initial_result")
+    metadata_filter = answer_state.get("metadata_filter")
+    source_citations = answer_state.get("source_citations", result.grounding.citations)
+    source_view_links = answer_state.get("source_view_links", {})
+    image_preview_notes = answer_state.get("image_preview_notes", {})
+    media_data_urls = answer_state.get("media_data_urls", {})
+    source_image_data_urls = answer_state.get("source_image_data_urls", {})
+
+    st.markdown("### Answer")
+    question = (answer_state.get("question") or "").strip()
+    if question:
+        st.caption(f"Question: {question}")
+    st.caption(
+        "Source mode: Google Search grounding"
+        if answer_state.get("use_web")
+        else "Source mode: selected File Search store"
+    )
+    answer_store_name = answer_state.get("selected_store_name")
+    if answer_store_name:
+        st.caption(f"Answer store: `{answer_store_name}`")
+    if metadata_filter:
+        st.caption(f"Metadata filter: `{metadata_filter}`")
+    if initial_result:
+        st.caption("Review pass: second File Search reanalysis was enabled.")
+    query_image_count = answer_state.get("query_image_count") or 0
+    if query_image_count:
+        st.caption(f"Used {query_image_count} uploaded image(s) as question context.")
+
+    if result.text:
+        rendered = render_answer_with_hover(
+            result.text,
+            result.grounding,
+            media_data_urls=media_data_urls,
+            source_image_data_urls=source_image_data_urls,
+            image_preview_notes=image_preview_notes,
+            source_view_links=source_view_links,
+        )
+        st.markdown(rendered.html, unsafe_allow_html=True)
+    else:
+        st.markdown("_No text returned._")
+    render_citation_pdf_open_buttons(
+        source_registry,
+        source_citations,
+        file_search_store_name=answer_store_name,
+        answer_id=answer_state.get("answer_id"),
+    )
+    if initial_result:
+        with st.expander("Initial answer before review"):
+            st.markdown(initial_result.text or "_No text returned._")
+            st.json(initial_result.grounding.raw_grounding_metadata or {})
+    render_citations(file_search, source_registry, result.grounding.citations, is_admin)
+    render_search_entry_point(result.raw_response)
+    with st.expander("Raw grounding metadata"):
+        st.json(result.grounding.raw_grounding_metadata or {})
+    with st.expander("Raw response"):
+        st.json(to_plain_data(result.raw_response))
+
+
+def remember_answer_state(answer_state: dict[str, Any]) -> None:
+    st.session_state[LAST_ASK_RESULT_KEY] = answer_state
+    answer_id = answer_state.get("answer_id")
+    if not isinstance(answer_id, str) or not answer_id:
+        return
+    cache = answer_state_cache()
+    cache[answer_id] = answer_state
+    while len(cache) > 20:
+        oldest_key = next(iter(cache))
+        cache.pop(oldest_key, None)
+
+
+def restore_answer_state_from_query_params() -> None:
+    answer_id = _query_param_value(st.query_params.get("answer_id"))
+    if not answer_id:
+        return
+    current = st.session_state.get(LAST_ASK_RESULT_KEY)
+    if isinstance(current, dict) and current.get("answer_id") == answer_id:
+        return
+    cached = answer_state_cache().get(answer_id)
+    if cached:
+        st.session_state[LAST_ASK_RESULT_KEY] = cached
 
 
 def render_metadata_filter_controls() -> tuple[str, str, str, str, str]:
@@ -844,6 +959,7 @@ def render_citation_pdf_open_buttons(
     source_registry: SourceRegistry,
     citations: list[Citation],
     file_search_store_name: str | None,
+    answer_id: str | None = None,
 ) -> None:
     targets = citation_source_view_targets(
         source_registry,
@@ -855,11 +971,13 @@ def render_citation_pdf_open_buttons(
         for target in targets:
             page_number = target.get("page_number")
             title = target.get("title") or "PDF source"
-            label = f"Open citation {target['citation_index']} PDF"
+            label = f"Show citation {target['citation_index']} PDF"
             if page_number:
                 label = f"{label} at page {page_number}"
             if st.button(label, key=f"open-source-{target['citation_index']}-{target['source_id']}"):
                 st.query_params["source_id"] = str(target["source_id"])
+                if answer_id:
+                    st.query_params["answer_id"] = answer_id
                 if page_number:
                     st.query_params["page"] = str(page_number)
                 elif "page" in st.query_params:
@@ -927,14 +1045,16 @@ def render_selected_source_viewer(
     selected_store_name: str | None,
     is_admin: bool,
 ) -> None:
+    st.subheader("Cited source")
     source_id = _query_param_value(st.query_params.get("source_id"))
     if not source_id:
+        st.info("Cited source previews will appear here.")
+        st.caption("Hover over highlighted answer text or use a Source PDF button to show the cited page.")
         return
 
     page_number = _positive_int(_query_param_value(st.query_params.get("page")))
-    st.subheader("Cited source")
-    if st.button("Close cited source viewer"):
-        st.query_params.clear()
+    if st.button("Clear source preview"):
+        clear_source_query_params()
         st.rerun()
 
     record = source_registry.get(source_id)
@@ -1070,20 +1190,17 @@ def render_source_record_viewer(
 
 
 def render_pdf_preview(data: bytes, page_number: int | None = None) -> None:
-    page_fragment = f"#page={page_number}" if page_number else ""
-    encoded = base64.b64encode(data).decode("ascii")
-    components.html(
-        f"""
-        <iframe
-            src="data:application/pdf;base64,{encoded}{page_fragment}"
-            width="100%"
-            height="720"
-            style="border: 1px solid #d0d7de; border-radius: 6px;"
-            title="PDF source preview">
-        </iframe>
-        """,
-        height=740,
-        scrolling=False,
+    try:
+        rendered_page, page_count, png_bytes = cached_pdf_page_preview(data, page_number)
+    except PDFPreviewError as exc:
+        st.error(str(exc))
+        return
+
+    st.caption(f"Previewing page {rendered_page} of {page_count}.")
+    st.image(
+        png_bytes,
+        caption=f"PDF page {rendered_page}",
+        width="stretch",
     )
 
 
@@ -1171,6 +1288,7 @@ def citation_source_view_links(
     source_registry: SourceRegistry,
     citations: list[Citation],
     file_search_store_name: str | None,
+    answer_id: str | None = None,
 ) -> dict[str, str]:
     links: dict[str, str] = {}
     for citation in citations:
@@ -1184,6 +1302,8 @@ def citation_source_view_links(
         params = {"source_id": record.source_id}
         if citation.page_number:
             params["page"] = str(citation.page_number)
+        if answer_id:
+            params["answer_id"] = answer_id
         link = f"?{urlencode(params)}"
         links[record.source_id] = link
         if citation.title:
@@ -1311,6 +1431,12 @@ def _query_param_value(value: Any) -> str | None:
     if isinstance(value, list):
         value = value[0] if value else None
     return value if isinstance(value, str) else None
+
+
+def clear_source_query_params() -> None:
+    for key in ("source_id", "page"):
+        if key in st.query_params:
+            del st.query_params[key]
 
 
 def _positive_int(value: str | None) -> int | None:

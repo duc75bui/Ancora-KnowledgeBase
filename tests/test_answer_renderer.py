@@ -171,9 +171,9 @@ def test_render_answer_can_link_to_local_pdf_source_viewer():
         source_view_links={"source-1": "?source_id=source-1&page=5"},
     )
 
-    assert "Open local PDF at page 5" in rendered.html
+    assert "Show page 5 in source panel" in rendered.html
     assert "?source_id=source-1&amp;page=5" in rendered.html
-    assert 'target="_self"' in rendered.html
+    assert "target=" not in rendered.html
 
 
 def test_render_answer_explains_missing_image_preview():
