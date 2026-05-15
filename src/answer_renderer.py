@@ -18,10 +18,12 @@ def render_answer_with_hover(
     media_data_urls: dict[str, str] | None = None,
     source_image_data_urls: dict[str, str] | None = None,
     image_preview_notes: dict[str, str] | None = None,
+    source_view_links: dict[str, str] | None = None,
 ) -> RenderedAnswer:
     media_data_urls = media_data_urls or {}
     source_image_data_urls = source_image_data_urls or {}
     image_preview_notes = image_preview_notes or {}
+    source_view_links = source_view_links or {}
     spans = sorted(
         grounding.support_spans,
         key=lambda item: (item.start_index, item.end_index),
@@ -49,6 +51,7 @@ def render_answer_with_hover(
             media_data_urls,
             source_image_data_urls,
             image_preview_notes,
+            source_view_links,
         )
         label = _citation_label(span.citation_indices)
         parts.append(
@@ -83,6 +86,7 @@ def _tooltip_html(
     media_data_urls: dict[str, str],
     source_image_data_urls: dict[str, str],
     image_preview_notes: dict[str, str],
+    source_view_links: dict[str, str],
 ) -> str:
     if not indices:
         return '<span class="tooltip-title">Grounding metadata</span><span>No citation index was returned.</span>'
@@ -109,11 +113,13 @@ def _tooltip_html(
             source_image_data_urls,
             image_preview_notes,
         )
+        source_link = _source_view_link_html(citation, source_view_links)
         sections.append(
             '<span class="tooltip-section">'
             f'<span class="tooltip-title">{html.escape(display_title)}</span>'
             f'<span class="tooltip-meta">{html.escape(" | ".join(meta_bits))}</span>'
             f"{media_preview}"
+            f"{source_link}"
             f'<span class="tooltip-snippet">{html.escape(snippet)}</span>'
             "</span>"
         )
@@ -169,6 +175,27 @@ def _media_preview_html(
         '<img class="tooltip-media" '
         f'src="{html.escape(data_url, quote=True)}" '
         f'alt="{html.escape(title, quote=True)}">'
+    )
+
+
+def _source_view_link_html(citation: Citation, source_view_links: dict[str, str]) -> str:
+    source_id = _custom_metadata_string_value(citation.custom_metadata, "source_id")
+    link = None
+    if source_id:
+        link = source_view_links.get(source_id)
+    if not link and citation.title:
+        link = source_view_links.get(citation.title)
+    if not link:
+        return ""
+    label = "Open local PDF"
+    if citation.page_number is not None:
+        label = f"Open local PDF at page {citation.page_number}"
+    return (
+        '<a class="tooltip-source-link" '
+        f'href="{html.escape(link, quote=True)}" '
+        'target="_parent">'
+        f"{html.escape(label)}"
+        "</a>"
     )
 
 
@@ -286,6 +313,14 @@ def _style_block() -> str:
   font-size: 12px;
   line-height: 1.45;
   margin: 8px 0;
+}
+.tooltip-source-link {
+  color: #93c5fd;
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 700;
+  margin: 6px 0 8px;
+  text-decoration: underline;
 }
 .citation-note {
   color: #64748b;

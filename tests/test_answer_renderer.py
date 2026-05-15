@@ -143,6 +143,39 @@ def test_render_answer_can_embed_source_image_matched_by_title():
     assert "data:image/png;base64,titlematch" in rendered.html
 
 
+def test_render_answer_can_link_to_local_pdf_source_viewer():
+    grounding = GroundingResult(
+        citations=[
+            Citation(
+                title="manual.pdf",
+                text="The procedure starts on page five.",
+                page_number=5,
+                custom_metadata=[{"key": "source_id", "string_value": "source-1"}],
+            )
+        ],
+        grounding_supports=[],
+        support_spans=[
+            GroundingSupportSpan(
+                start_index=0,
+                end_index=13,
+                text="The procedure",
+                citation_indices=[0],
+            )
+        ],
+        raw_grounding_metadata=None,
+    )
+
+    rendered = render_answer_with_hover(
+        "The procedure starts on page five.",
+        grounding,
+        source_view_links={"source-1": "?source_id=source-1&page=5"},
+    )
+
+    assert "Open local PDF at page 5" in rendered.html
+    assert "?source_id=source-1&amp;page=5" in rendered.html
+    assert 'target="_parent"' in rendered.html
+
+
 def test_render_answer_explains_missing_image_preview():
     grounding = GroundingResult(
         citations=[Citation(title="diagram.png", text="The diagram shows the flow.")],

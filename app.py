@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 from typing import Any
+from urllib.parse import urlencode
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -93,6 +94,7 @@ def main() -> None:
 
     stores = load_stores(file_search)
     selected_store_name = render_store_selector(stores, is_admin=is_admin)
+    render_selected_source_viewer(source_registry, selected_store_name, is_admin)
 
     render_ask_tab(
         qa_engine,
@@ -660,6 +662,11 @@ def render_ask_tab(
             st.caption(f"Used {len(query_images)} uploaded image(s) as question context.")
         media_data_urls = {}
         source_image_data_urls = {}
+        source_view_links = citation_source_view_links(
+            source_registry,
+            result.grounding.citations,
+            file_search_store_name=selected_store_name,
+        )
         image_preview_notes = image_preview_notes_for_citations(
             result.grounding.citations,
             is_admin=is_admin,
@@ -683,6 +690,7 @@ def render_ask_tab(
                 media_data_urls=media_data_urls,
                 source_image_data_urls=source_image_data_urls,
                 image_preview_notes=image_preview_notes,
+                source_view_links=source_view_links,
             )
             components.html(
                 rendered.html,
@@ -840,6 +848,43 @@ def render_documents_tab(
     render_source_archive(source_registry, selected_store_name, is_admin)
 
 
+def render_selected_source_viewer(
+    source_registry: SourceRegistry,
+    selected_store_name: str | None,
+    is_admin: bool,
+) -> None:
+    source_id = _query_param_value(st.query_params.get("source_id"))
+    if not source_id:
+        return
+
+    page_number = _positive_int(_query_param_value(st.query_params.get("page")))
+    st.subheader("Cited source")
+    if st.button("Close cited source viewer"):
+        st.query_params.clear()
+        st.rerun()
+
+    if not is_admin:
+        st.info("Admin login is required to view locally archived source files.")
+        return
+
+    record = source_registry.get(source_id)
+    if record is None:
+        st.warning("The cited source file is not available in the local archive.")
+        return
+    if selected_store_name and record.file_search_store_name != selected_store_name:
+        st.warning("This local source belongs to a different File Search store.")
+        return
+
+    render_source_record_viewer(
+        source_registry=source_registry,
+        record=record,
+        key_prefix=f"linked-source-{record.source_id}",
+        page_number=page_number,
+        force_pdf_preview=True,
+    )
+    st.divider()
+
+
 def render_citation_source_controls(
     source_registry: SourceRegistry,
     citation: Citation,
@@ -912,6 +957,7 @@ def render_source_record_viewer(
     record: SourceRecord,
     key_prefix: str,
     page_number: int | None = None,
+    force_pdf_preview: bool = False,
 ) -> None:
     st.caption(f"Original source: {record.original_filename}")
     try:
@@ -928,7 +974,11 @@ def render_source_record_viewer(
         key=f"{key_prefix}-download",
     )
     if record.mime_type == "application/pdf":
-        show_pdf = st.checkbox("Show PDF preview", value=False, key=f"{key_prefix}-pdf-preview")
+        show_pdf = st.checkbox(
+            "Show PDF preview",
+            value=force_pdf_preview,
+            key=f"{key_prefix}-pdf-preview",
+        )
         if show_pdf:
             render_pdf_preview(data, page_number)
     elif record.mime_type in {"image/png", "image/jpeg"}:
@@ -1034,6 +1084,58 @@ def citation_source_image_data_urls(
             if citation.title:
                 source_data_urls[citation.title] = data_url
     return source_data_urls
+
+
+def citation_source_view_links(
+    source_registry: SourceRegistry,
+    citations: list[Citation],
+    file_search_store_name: str | None,
+) -> dict[str, str]:
+    links: dict[str, str] = {}
+    for citation in citations:
+        record = _citation_source_record(
+            source_registry,
+            citation,
+            file_search_store_name,
+        )
+        if record is None or record.mime_type != "application/pdf":
+            continue
+        params = {"source_id": record.source_id}
+        if citation.page_number:
+            params["page"] = str(citation.page_number)
+        link = f"?{urlencode(params)}"
+        links[record.source_id] = link
+        if citation.title:
+            links.setdefault(citation.title, link)
+    return links
+
+
+def _citation_source_record(
+    source_registry: SourceRegistry,
+    citation: Citation,
+    file_search_store_name: str | None,
+) -> SourceRecord | None:
+    source_id = source_id_from_custom_metadata(citation.custom_metadata)
+    record = source_registry.get(source_id) if source_id else None
+    if record is None:
+        record = source_registry.find_by_filename(citation.title, file_search_store_name)
+    return record
+
+
+def _query_param_value(value: Any) -> str | None:
+    if isinstance(value, list):
+        value = value[0] if value else None
+    return value if isinstance(value, str) else None
+
+
+def _positive_int(value: str | None) -> int | None:
+    if not value:
+        return None
+    try:
+        parsed = int(value)
+    except ValueError:
+        return None
+    return parsed if parsed > 0 else None
 
 
 def _store_label(name: str, stores: list[Any]) -> str:
