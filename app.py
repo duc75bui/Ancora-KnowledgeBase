@@ -699,6 +699,11 @@ def render_ask_tab(
             )
         else:
             st.markdown("_No text returned._")
+        render_citation_pdf_open_buttons(
+            source_registry,
+            result.grounding.citations,
+            file_search_store_name=selected_store_name,
+        )
         if initial_result:
             with st.expander("Initial answer before review"):
                 st.markdown(initial_result.text or "_No text returned._")
@@ -801,6 +806,36 @@ def render_citations(
                     )
                 except GeminiAPIError as exc:
                     st.error(str(exc))
+
+
+def render_citation_pdf_open_buttons(
+    source_registry: SourceRegistry,
+    citations: list[Citation],
+    file_search_store_name: str | None,
+) -> None:
+    targets = citation_source_view_targets(
+        source_registry,
+        citations,
+        file_search_store_name,
+    )
+    if not targets:
+        return
+
+    st.markdown("#### Source PDF")
+    for target in targets:
+        page_number = target.get("page_number")
+        title = target.get("title") or "PDF source"
+        label = f"Open citation {target['citation_index']} PDF"
+        if page_number:
+            label = f"{label} at page {page_number}"
+        if st.button(label, key=f"open-source-{target['citation_index']}-{target['source_id']}"):
+            st.query_params["source_id"] = str(target["source_id"])
+            if page_number:
+                st.query_params["page"] = str(page_number)
+            elif "page" in st.query_params:
+                del st.query_params["page"]
+            st.rerun()
+        st.caption(title)
 
 
 def render_search_entry_point(raw_response: Any) -> None:
@@ -1108,6 +1143,39 @@ def citation_source_view_links(
         if citation.title:
             links.setdefault(citation.title, link)
     return links
+
+
+def citation_source_view_targets(
+    source_registry: SourceRegistry,
+    citations: list[Citation],
+    file_search_store_name: str | None,
+) -> list[dict[str, object]]:
+    targets: list[dict[str, object]] = []
+    seen: set[tuple[str, int | None]] = set()
+    for index, citation in enumerate(citations, start=1):
+        record = _citation_source_record(
+            source_registry,
+            citation,
+            file_search_store_name,
+        )
+        if record is None or record.mime_type != "application/pdf":
+            continue
+        key = (record.source_id, citation.page_number)
+        if key in seen:
+            continue
+        seen.add(key)
+        title = citation.title or record.original_filename
+        if citation.page_number:
+            title = f"{title} - page {citation.page_number}"
+        targets.append(
+            {
+                "citation_index": index,
+                "source_id": record.source_id,
+                "title": title,
+                "page_number": citation.page_number,
+            }
+        )
+    return targets
 
 
 def _citation_source_record(

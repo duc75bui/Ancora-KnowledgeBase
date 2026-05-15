@@ -193,7 +193,7 @@ def _source_view_link_html(citation: Citation, source_view_links: dict[str, str]
     return (
         '<a class="tooltip-source-link" '
         f'href="{html.escape(link, quote=True)}" '
-        'target="_parent">'
+        'target="_top">'
         f"{html.escape(label)}"
         "</a>"
     )

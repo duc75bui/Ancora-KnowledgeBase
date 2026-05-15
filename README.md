@@ -1,4 +1,4 @@
-# ancoraDocs KnowledgeBase v2.14
+# ancoraDocs KnowledgeBase v2.15
 
 This is a basic local Streamlit app for Retrieval Augmented Generation with the Google Gemini File Search API. It uses Google File Search stores as the source of truth: Google imports files, chunks them, creates embeddings, indexes content, retrieves relevant chunks, returns grounding metadata, and manages File Search documents.
 
@@ -87,7 +87,7 @@ Fix it by creating or selecting a Gemini API key in Google AI Studio, or by edit
 - Lets the user attach optional query-context images in the Ask tab using Gemini inline image input. Supported image input formats are PNG, JPEG, WebP, HEIC, and HEIF.
 - Displays answers, citations, page numbers, media IDs, custom metadata, grounding supports, and raw grounding metadata when returned.
 - Highlights answer spans when Google returns `groundingSupports`; hover or focus the highlighted text to inspect the retrieved snippet, source title, page number, and optional image preview.
-- Adds an `Open local PDF at page ...` link in citation hover cards when the citation maps to a locally archived PDF uploaded through this app.
+- Adds `Open cited PDF` buttons below the answer and an `Open local PDF at page ...` link in citation hover cards when the citation maps to a locally archived PDF uploaded through this app.
 - Can fetch cited media bytes by `media_id` when the API returns media citations.
 - Can automatically fetch image media returned by File Search `media_id` and embed browser-displayable thumbnails in citation hover cards.
 - For logged-in admins, can also show a locally archived source-image thumbnail in hover cards when a citation maps back to an image uploaded through this app.
@@ -174,7 +174,7 @@ Metadata filtering narrows what File Search retrieves from the selected store. I
 - Citation hover depends on Google returning `groundingSupports` span metadata. If no span metadata is returned, the app still shows the citation list and raw grounding metadata.
 - Google File Search currently documents multimodal image support for PNG and JPEG. The hover renderer can display common browser-safe raster formats if Google returns those bytes or if an admin views a locally archived image, but File Search ingestion is still limited by Google's supported formats.
 - Page references depend on Google returning `retrieved_context.page_number`. The app preserves initial-pass page numbers when the optional review pass omits them.
-- Citation PDF links open the archived PDF at the cited page when the file was uploaded through this app and is still available in `.source_files/`. Exact text/image coordinates are not available unless Google returns location metadata beyond page number.
+- Citation PDF buttons and hover links open the archived PDF at the cited page when the file was uploaded through this app and is still available in `.source_files/`. The native buttons below the answer are the reliable path because hover cards render inside a Streamlit iframe. Exact text/image coordinates are not available unless Google returns location metadata beyond page number.
 - Image hover previews depend on Google returning `media_id` values in grounding metadata, or on the citation metadata mapping to a local archived source image for an admin. File Search can use embedded PDF images for retrieval, but if Google does not return a downloadable `media_id`, the app cannot know which embedded PDF image to display in the hover card.
 - Ask-tab image attachments are prompt context, not File Search documents. They are sent inline to Gemini and are limited to about 18 MB combined in this app to stay below Google's 20 MB inline request guidance.
 

@@ -173,7 +173,7 @@ def test_render_answer_can_link_to_local_pdf_source_viewer():
 
     assert "Open local PDF at page 5" in rendered.html
     assert "?source_id=source-1&amp;page=5" in rendered.html
-    assert 'target="_parent"' in rendered.html
+    assert 'target="_top"' in rendered.html
 
 
 def test_render_answer_explains_missing_image_preview():
