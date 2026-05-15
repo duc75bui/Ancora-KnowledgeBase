@@ -645,6 +645,7 @@ def render_ask_tab(
                         grounding=supplement_missing_citation_details(
                             result.grounding,
                             initial_result.grounding,
+                            allow_index_fallback=True,
                         ),
                         raw_response=result.raw_response,
                     )
@@ -662,9 +663,13 @@ def render_ask_tab(
             st.caption(f"Used {len(query_images)} uploaded image(s) as question context.")
         media_data_urls = {}
         source_image_data_urls = {}
+        source_citations = combined_source_citations(
+            result.grounding.citations,
+            initial_result.grounding.citations if initial_result else [],
+        )
         source_view_links = citation_source_view_links(
             source_registry,
-            result.grounding.citations,
+            source_citations,
             file_search_store_name=selected_store_name,
         )
         image_preview_notes = image_preview_notes_for_citations(
@@ -701,7 +706,7 @@ def render_ask_tab(
             st.markdown("_No text returned._")
         render_citation_pdf_open_buttons(
             source_registry,
-            result.grounding.citations,
+            source_citations,
             file_search_store_name=selected_store_name,
         )
         if initial_result:
@@ -1145,6 +1150,21 @@ def citation_source_view_links(
     return links
 
 
+def combined_source_citations(
+    primary: list[Citation],
+    fallback: list[Citation],
+) -> list[Citation]:
+    combined: list[Citation] = []
+    seen: set[tuple[str, str, int | None]] = set()
+    for citation in [*primary, *fallback]:
+        key = _citation_identity(citation)
+        if key in seen:
+            continue
+        seen.add(key)
+        combined.append(citation)
+    return combined
+
+
 def citation_source_view_targets(
     source_registry: SourceRegistry,
     citations: list[Citation],
@@ -1176,6 +1196,19 @@ def citation_source_view_targets(
             }
         )
     return targets
+
+
+def _citation_identity(citation: Citation) -> tuple[str, str, int | None]:
+    source_id = source_id_from_custom_metadata(citation.custom_metadata)
+    if source_id:
+        return ("source_id", source_id, citation.page_number)
+    if citation.media_id:
+        return ("media_id", citation.media_id, citation.page_number)
+    if citation.uri:
+        return ("uri", citation.uri, citation.page_number)
+    if citation.title:
+        return ("title", citation.title, citation.page_number)
+    return ("text", citation.text or "", citation.page_number)
 
 
 def _citation_source_record(

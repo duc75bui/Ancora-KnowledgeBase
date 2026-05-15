@@ -152,3 +152,34 @@ def test_supplement_missing_citation_details_skips_ambiguous_title_matches():
     result = supplement_missing_citation_details(reviewed, initial)
 
     assert result.citations[0].page_number is None
+
+
+def test_supplement_missing_citation_details_can_fallback_by_index_for_review_pass():
+    reviewed = GroundingResult(
+        citations=[Citation(title="Reviewed source", text="Reviewed snippet")],
+        grounding_supports=[],
+        support_spans=[],
+        raw_grounding_metadata=None,
+    )
+    initial = GroundingResult(
+        citations=[
+            Citation(
+                title="manual.pdf",
+                page_number=12,
+                custom_metadata=[{"key": "source_id", "stringValue": "source-1"}],
+            )
+        ],
+        grounding_supports=[],
+        support_spans=[],
+        raw_grounding_metadata=None,
+    )
+
+    result = supplement_missing_citation_details(
+        reviewed,
+        initial,
+        allow_index_fallback=True,
+    )
+
+    assert result.citations[0].title == "Reviewed source"
+    assert result.citations[0].page_number == 12
+    assert result.citations[0].custom_metadata == [{"key": "source_id", "stringValue": "source-1"}]

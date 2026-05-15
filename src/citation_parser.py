@@ -82,6 +82,7 @@ def parse_grounding_metadata(response_or_metadata: Any) -> GroundingResult:
 def supplement_missing_citation_details(
     primary: GroundingResult,
     fallback: GroundingResult | None,
+    allow_index_fallback: bool = False,
 ) -> GroundingResult:
     """Fill missing citation details from an earlier grounding result."""
     if not fallback or not primary.citations or not fallback.citations:
@@ -89,7 +90,12 @@ def supplement_missing_citation_details(
 
     citations: list[Citation] = []
     for index, citation in enumerate(primary.citations):
-        fallback_citation = _matching_fallback_citation(index, citation, fallback.citations)
+        fallback_citation = _matching_fallback_citation(
+            index,
+            citation,
+            fallback.citations,
+            allow_index_fallback=allow_index_fallback,
+        )
         if fallback_citation is None:
             citations.append(citation)
             continue
@@ -153,12 +159,15 @@ def _matching_fallback_citation(
     index: int,
     citation: Citation,
     fallback_citations: list[Citation],
+    allow_index_fallback: bool = False,
 ) -> Citation | None:
     if index < len(fallback_citations):
         fallback = fallback_citations[index]
         if _strong_citations_match(citation, fallback):
             return fallback
         if _same_title(citation, fallback) and _title_is_unique(citation.title, fallback_citations):
+            return fallback
+        if allow_index_fallback and _citation_needs_source_details(citation):
             return fallback
 
     strong_matches = [
@@ -193,6 +202,14 @@ def _title_is_unique(title: str | None, citations: list[Citation]) -> bool:
     if not title:
         return False
     return sum(1 for citation in citations if citation.title == title) == 1
+
+
+def _citation_needs_source_details(citation: Citation) -> bool:
+    return (
+        citation.page_number is None
+        or not citation.media_id
+        or not citation.custom_metadata
+    )
 
 
 def _normalize_custom_metadata(metadata: Any) -> list[dict[str, Any]] | None:
