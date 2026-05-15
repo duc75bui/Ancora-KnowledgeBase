@@ -61,3 +61,10 @@ def test_advanced_metadata_filter_passes_through():
     result = build_simple_metadata_filter("", "=", "", "String", 'author = "Robert Graves"')
 
     assert metadata_filter_value(result) == 'author = "Robert Graves"'
+
+
+def test_empty_metadata_filter_is_none_without_errors():
+    result = build_simple_metadata_filter("", "=", "", "String")
+
+    assert result.errors == []
+    assert metadata_filter_value(result) is None

@@ -609,7 +609,7 @@ def render_ask_tab(
                         question=question,
                         model=model,
                         file_search_store_name=selected_store_name or "",
-                        metadata_filter=metadata_filter.strip() or None,
+                        metadata_filter=metadata_filter,
                         top_k=int(top_k) if top_k else None,
                         query_images=query_images,
                         answer_style=answer_style,

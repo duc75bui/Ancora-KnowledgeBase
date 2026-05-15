@@ -1,4 +1,4 @@
-# ancoraDocs KnowledgeBase v2.11
+# ancoraDocs KnowledgeBase v2.12
 
 This is a basic local Streamlit app for Retrieval Augmented Generation with the Google Gemini File Search API. It uses Google File Search stores as the source of truth: Google imports files, chunks them, creates embeddings, indexes content, retrieves relevant chunks, returns grounding metadata, and manages File Search documents.
 
