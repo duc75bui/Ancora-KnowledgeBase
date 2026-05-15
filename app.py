@@ -295,8 +295,16 @@ def render_ask_tab(
         st.markdown("### Answer")
         media_data_urls = {}
         source_image_data_urls = {}
+        image_preview_notes = image_preview_notes_for_citations(
+            result.grounding.citations,
+            is_admin=is_admin,
+        )
         if include_media_previews:
-            media_data_urls = citation_media_data_urls(file_search, result.grounding.citations)
+            media_data_urls, media_notes = citation_media_data_urls(
+                file_search,
+                result.grounding.citations,
+            )
+            image_preview_notes.update(media_notes)
             source_image_data_urls = citation_source_image_data_urls(
                 source_registry,
                 result.grounding.citations,
@@ -308,6 +316,7 @@ def render_ask_tab(
                 result.grounding,
                 media_data_urls=media_data_urls,
                 source_image_data_urls=source_image_data_urls,
+                image_preview_notes=image_preview_notes,
             )
             components.html(
                 rendered.html,
@@ -514,20 +523,46 @@ def render_pdf_preview(data: bytes, page_number: int | None = None) -> None:
 def citation_media_data_urls(
     file_search: FileSearchManager,
     citations: list[Citation],
-) -> dict[str, str]:
+) -> tuple[dict[str, str], dict[str, str]]:
     media_data_urls: dict[str, str] = {}
+    notes: dict[str, str] = {}
     for citation in citations:
         if not citation.media_id or citation.media_id in media_data_urls:
             continue
         try:
             media = file_search.download_media(citation.media_id)
         except GeminiAPIError as exc:
-            st.warning(f"Could not fetch cited media preview: {exc}")
+            notes[citation.media_id] = f"File Search returned a media ID, but the app could not download it: {exc}"
             continue
         data_url = data_url_for_displayable_image(media)
         if data_url:
             media_data_urls[citation.media_id] = data_url
-    return media_data_urls
+        else:
+            notes[citation.media_id] = "File Search returned media bytes, but they were not a browser-displayable image or were too large to inline."
+    return media_data_urls, notes
+
+
+def image_preview_notes_for_citations(
+    citations: list[Citation],
+    is_admin: bool,
+) -> dict[str, str]:
+    notes: dict[str, str] = {}
+    for citation in citations:
+        source_id = source_id_from_custom_metadata(citation.custom_metadata)
+        if citation.media_id:
+            notes.setdefault(citation.media_id, "File Search returned a media ID, but no image preview was prepared.")
+            continue
+        if source_id:
+            if is_admin:
+                notes.setdefault(source_id, "This citation maps to a local source file, but it is not an archived image preview.")
+            else:
+                notes.setdefault(source_id, "This citation has no File Search media ID. Log in as admin to view the locally archived source image if this upload came through the app.")
+            continue
+        title = (citation.title or "").lower()
+        if title.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".avif")):
+            key = citation.title or title
+            notes.setdefault(key, "File Search cited this image by name, but did not return a downloadable media ID.")
+    return notes
 
 
 def citation_source_image_data_urls(

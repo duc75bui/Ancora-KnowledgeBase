@@ -17,9 +17,11 @@ def render_answer_with_hover(
     grounding: GroundingResult,
     media_data_urls: dict[str, str] | None = None,
     source_image_data_urls: dict[str, str] | None = None,
+    image_preview_notes: dict[str, str] | None = None,
 ) -> RenderedAnswer:
     media_data_urls = media_data_urls or {}
     source_image_data_urls = source_image_data_urls or {}
+    image_preview_notes = image_preview_notes or {}
     spans = sorted(
         grounding.support_spans,
         key=lambda item: (item.start_index, item.end_index),
@@ -46,6 +48,7 @@ def render_answer_with_hover(
             grounding.citations,
             media_data_urls,
             source_image_data_urls,
+            image_preview_notes,
         )
         label = _citation_label(span.citation_indices)
         parts.append(
@@ -79,6 +82,7 @@ def _tooltip_html(
     citations: list[Citation],
     media_data_urls: dict[str, str],
     source_image_data_urls: dict[str, str],
+    image_preview_notes: dict[str, str],
 ) -> str:
     if not indices:
         return '<span class="tooltip-title">Grounding metadata</span><span>No citation index was returned.</span>'
@@ -95,7 +99,13 @@ def _tooltip_html(
         if citation.file_search_store:
             meta_bits.append(citation.file_search_store)
         snippet = _compact(citation.text or "")
-        media_preview = _media_preview_html(citation, title, media_data_urls, source_image_data_urls)
+        media_preview = _media_preview_html(
+            citation,
+            title,
+            media_data_urls,
+            source_image_data_urls,
+            image_preview_notes,
+        )
         sections.append(
             '<span class="tooltip-section">'
             f'<span class="tooltip-title">{html.escape(title)}</span>'
@@ -114,9 +124,11 @@ def _media_preview_html(
     title: str,
     media_data_urls: dict[str, str],
     source_image_data_urls: dict[str, str],
+    image_preview_notes: dict[str, str],
 ) -> str:
     label = None
     data_url = None
+    note = None
     if citation.media_id and citation.media_id in media_data_urls:
         label = "Exact cited image chunk"
         data_url = media_data_urls[citation.media_id]
@@ -125,9 +137,15 @@ def _media_preview_html(
         if source_id and source_id in source_image_data_urls:
             label = "Archived source image"
             data_url = source_image_data_urls[source_id]
+        elif citation.media_id:
+            note = image_preview_notes.get(citation.media_id)
+        elif source_id:
+            note = image_preview_notes.get(source_id)
 
     if not data_url:
-        return ""
+        if note:
+            return f'<span class="tooltip-image-note">{html.escape(note)}</span>'
+        return '<span class="tooltip-image-note">No image preview handle was returned for this citation.</span>'
     return (
         '<span class="tooltip-image-label">'
         f"{html.escape(label or 'Image preview')}"
@@ -245,6 +263,13 @@ def _style_block() -> str:
   font-size: 12px;
   font-weight: 700;
   margin-top: 8px;
+}
+.tooltip-image-note {
+  color: #fbbf24;
+  display: block;
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 8px 0;
 }
 .citation-note {
   color: #64748b;
