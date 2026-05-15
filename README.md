@@ -1,4 +1,4 @@
-# Gemini File Search RAG Streamlit App
+# ancoraDocs KnowledgeBase v2.00
 
 This is a basic local Streamlit app for Retrieval Augmented Generation with the Google Gemini File Search API. It uses Google File Search stores as the source of truth: Google imports files, chunks them, creates embeddings, indexes content, retrieves relevant chunks, returns grounding metadata, and manages File Search documents.
 
@@ -35,7 +35,7 @@ GEMINI_API_KEY=your-gemini-api-key
 ADMIN_PASSWORD=admin123
 ```
 
-You can also leave `.env` unset and enter the key in the Streamlit sidebar. The app never hardcodes or prints the full API key.
+You can also leave `.env` unset and have an admin connect the key in the Streamlit sidebar for that browser session. The app never hardcodes or prints the full API key.
 
 `ADMIN_PASSWORD` controls access to locally archived original files. The default `admin123` is only for local testing.
 
@@ -62,7 +62,9 @@ Fix it by creating or selecting a Gemini API key in Google AI Studio, or by edit
 ## What The App Does
 
 - Loads `GEMINI_API_KEY` from `.env` or accepts a key in the UI.
-- Lets the user choose a File Search-supported Gemini model.
+- Admin users can connect or change the Gemini API key when it is not loaded from `.env`; connected keys are masked and disabled in the sidebar.
+- Lets users choose a File Search-supported Gemini model.
+- Lets users choose the File Search store to ask against.
 - Normal users only see the Ask workflow.
 - Admin users can list, create, select, and delete Google Gemini File Search stores.
 - Creates stores with `models/gemini-embedding-2` so text and PNG/JPEG images can be used for multimodal File Search.

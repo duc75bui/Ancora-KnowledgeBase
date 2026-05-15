@@ -12,6 +12,8 @@ from dotenv import load_dotenv
 FILE_SEARCH_EMBEDDING_MODEL = "models/gemini-embedding-2"
 DEFAULT_MODEL = "gemini-3-flash-preview"
 TEMP_UPLOAD_DIR = Path(".tmp_uploads")
+APP_VERSION = "2.00"
+APP_NAME = f"ancoraDocs KnowledgeBase v{APP_VERSION}"
 
 SUPPORTED_FILE_SEARCH_MODELS: dict[str, str] = {
     "gemini-3.1-pro-preview": "Gemini 3.1 Pro Preview",

@@ -1,4 +1,4 @@
-# Ancora KnowledgeBase App Deployment Guide
+# ancoraDocs KnowledgeBase v2.00 Deployment Guide
 
 This guide is for deploying the local Streamlit app on a Windows server or internal workstation.
 
@@ -113,7 +113,7 @@ If users need to access the app from another machine:
 
 ```powershell
 New-NetFirewallRule `
-  -DisplayName "Ancora KnowledgeBase App Streamlit 8501" `
+  -DisplayName "ancoraDocs KnowledgeBase Streamlit 8501" `
   -Direction Inbound `
   -Protocol TCP `
   -LocalPort 8501 `
@@ -145,10 +145,10 @@ $action = New-ScheduledTaskAction `
 $trigger = New-ScheduledTaskTrigger -AtStartup
 
 Register-ScheduledTask `
-  -TaskName "Ancora KnowledgeBase App" `
+  -TaskName "ancoraDocs KnowledgeBase" `
   -Action $action `
   -Trigger $trigger `
-  -Description "Runs the Ancora KnowledgeBase Streamlit app" `
+  -Description "Runs the ancoraDocs KnowledgeBase Streamlit app" `
   -RunLevel Highest
 ```
 

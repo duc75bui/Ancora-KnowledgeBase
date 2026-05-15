@@ -10,6 +10,7 @@ from src.answer_renderer import estimate_answer_height, render_answer_with_hover
 from src.auth import DEFAULT_ADMIN_PASSWORD, admin_password_from_env, verify_admin_password
 from src.citation_parser import Citation, to_plain_data
 from src.config import (
+    APP_NAME,
     DEFAULT_MODEL,
     FILE_SEARCH_EMBEDDING_MODEL,
     SUPPORTED_FILE_SEARCH_MODELS,
@@ -31,7 +32,7 @@ from src.upload_manager import UploadManager
 from src.validation import accepted_extensions, safe_display_name, validate_file
 
 
-st.set_page_config(page_title="Gemini File Search RAG", page_icon="G", layout="wide")
+st.set_page_config(page_title=APP_NAME, page_icon="G", layout="wide")
 
 
 @st.cache_resource(show_spinner=False)
@@ -40,16 +41,16 @@ def cached_client(api_key: str):
 
 
 def main() -> None:
-    st.title("Gemini File Search RAG")
+    st.title(APP_NAME)
     st.caption("Local Streamlit app using Google-managed File Search stores for retrieval.")
 
     config = load_config()
-    api_key = render_api_key_controls(config.api_key)
-    model = render_model_controls()
     is_admin = render_admin_controls()
+    api_key = render_api_key_controls(config.api_key, is_admin=is_admin)
+    model = render_model_controls()
 
     if not api_key:
-        st.info("Set GEMINI_API_KEY in .env or enter a Gemini API key in the sidebar to continue.")
+        st.info("Admin login is required to connect a Gemini API key before users can ask questions.")
         return
 
     try:
@@ -85,14 +86,41 @@ def main() -> None:
         )
 
 
-def render_api_key_controls(env_api_key: str | None) -> str | None:
+def render_api_key_controls(env_api_key: str | None, is_admin: bool) -> str | None:
     st.sidebar.header("Connection")
+    if "session_api_key" not in st.session_state:
+        st.session_state.session_api_key = None
+
     if env_api_key:
-        st.sidebar.success(f"Using GEMINI_API_KEY {mask_secret(env_api_key)}")
+        st.session_state.session_api_key = env_api_key
+        st.sidebar.text_input("Gemini API key", value=mask_secret(env_api_key), disabled=True)
+        st.sidebar.success("Connected with GEMINI_API_KEY from .env")
+        if is_admin:
+            st.sidebar.caption("To rotate this key, update `.env` and restart the app.")
         return env_api_key
 
+    session_api_key = st.session_state.get("session_api_key")
+    if session_api_key:
+        st.sidebar.text_input("Gemini API key", value=mask_secret(session_api_key), disabled=True)
+        st.sidebar.success("Connected for this browser session")
+        if is_admin and st.sidebar.button("Change API key"):
+            st.session_state.session_api_key = None
+            cached_client.clear()
+            st.rerun()
+        elif not is_admin:
+            st.sidebar.caption("Admin login is required to change the API key.")
+        return session_api_key
+
+    if not is_admin:
+        st.sidebar.warning("Admin login required to connect API key.")
+        return None
+
     entered = st.sidebar.text_input("Gemini API key", type="password")
-    return entered.strip() if entered else None
+    if st.sidebar.button("Connect API key", disabled=not entered):
+        st.session_state.session_api_key = entered.strip()
+        cached_client.clear()
+        st.rerun()
+    return None
 
 
 def render_model_controls() -> str:
@@ -117,6 +145,7 @@ def render_admin_controls() -> bool:
         st.sidebar.success("Admin access enabled")
         if st.sidebar.button("Log out admin"):
             st.session_state.is_admin = False
+            st.rerun()
         return bool(st.session_state.is_admin)
 
     password = st.sidebar.text_input("Admin password", type="password")
@@ -126,6 +155,7 @@ def render_admin_controls() -> bool:
         if verify_admin_password(password):
             st.session_state.is_admin = True
             st.sidebar.success("Admin access enabled")
+            st.rerun()
         else:
             st.sidebar.error("Incorrect admin password")
     return bool(st.session_state.is_admin)
@@ -145,22 +175,13 @@ def load_stores(file_search: FileSearchManager) -> list[Any]:
 
 
 def render_store_selector(stores: list[Any], is_admin: bool) -> str | None:
-    if is_admin:
-        st.sidebar.header("Store")
+    st.sidebar.header("Store")
     if not stores:
-        if is_admin:
-            st.sidebar.warning("No File Search stores loaded.")
-        else:
-            st.info("No knowledge base store is available yet. Ask an admin to create or select a File Search store.")
+        st.sidebar.warning("No File Search stores loaded.")
+        st.info("No knowledge base store is available yet. Ask an admin to create a File Search store.")
         return None
 
     names = [object_name(store) for store in stores if object_name(store)]
-    if not is_admin:
-        selected = st.session_state.get("selected_store_name")
-        if selected in names:
-            return selected
-        return names[0] if names else None
-
     selected = st.sidebar.selectbox(
         "Selected File Search store",
         options=names,
