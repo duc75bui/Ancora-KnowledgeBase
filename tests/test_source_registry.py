@@ -14,6 +14,7 @@ def test_source_registry_saves_metadata_and_file(tmp_path):
 
     assert registry.get(record.source_id) == record
     assert registry.file_bytes(record) == b"%PDF data"
+    assert record.stored_path.startswith("uploads")
     assert registry.list_records("fileSearchStores/store-1") == [record]
     assert registry.list_records("fileSearchStores/other") == []
 
@@ -34,7 +35,19 @@ def test_source_registry_deletes_file_and_manifest_record(tmp_path):
     assert registry.delete_source(record.source_id)
 
     assert registry.get(record.source_id) is None
-    assert not (tmp_path / "sources" / record.source_id).exists()
+    assert not (tmp_path / "uploads" / record.source_id).exists()
+
+
+def test_source_registry_saves_non_pdf_files_in_shared_uploads_dir(tmp_path):
+    registry = SourceRegistry(tmp_path)
+    record = registry.save_source(
+        filename="notes.txt",
+        data=b"hello",
+        mime_type="text/plain",
+        file_search_store_name="fileSearchStores/store-1",
+    )
+
+    assert record.stored_path.startswith("uploads")
 
 
 def test_source_id_from_camel_case_metadata():

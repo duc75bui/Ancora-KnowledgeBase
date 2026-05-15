@@ -1,4 +1,4 @@
-# ancoraDocs KnowledgeBase v2.17
+# ancoraDocs KnowledgeBase v2.19
 
 This is a basic local Streamlit app for Retrieval Augmented Generation with the Google Gemini File Search API. It uses Google File Search stores as the source of truth: Google imports files, chunks them, creates embeddings, indexes content, retrieves relevant chunks, returns grounding metadata, and manages File Search documents.
 
@@ -76,7 +76,7 @@ Fix it by creating or selecting a Gemini API key in Google AI Studio, or by edit
 - Admin users can upload files directly into the selected File Search store with `upload_to_file_search_store`.
 - Admin users can attach File Search custom metadata during upload with common fields, an editable key/value table, and advanced `key=value` lines.
 - Lets the SDK/API infer upload MIME type from the file path, matching Google's direct-upload example. The app still validates MIME locally for user feedback and source archive metadata.
-- Archives a local copy of newly uploaded original files under `.source_files/` for admin-only viewing.
+- Archives a local copy of every newly uploaded original file under `.source_files/uploads/` for admin source management and citation source viewing.
 - Attaches `source_id`, `source_filename`, and `source_sha256` as File Search custom metadata during upload, along with admin-provided metadata.
 - Admin users can view long-running upload/import operation output.
 - Admin users can list and delete File Search documents in a selected store.
@@ -87,7 +87,7 @@ Fix it by creating or selecting a Gemini API key in Google AI Studio, or by edit
 - Lets the user attach optional query-context images in the Ask tab using Gemini inline image input. Supported image input formats are PNG, JPEG, WebP, HEIC, and HEIF.
 - Displays answers, citations, page numbers, media IDs, custom metadata, grounding supports, and raw grounding metadata when returned.
 - Highlights answer spans when Google returns `groundingSupports`; hover or focus the highlighted text to inspect the retrieved snippet, source title, page number, and optional image preview.
-- Adds `Open cited PDF` buttons below the answer and an `Open local PDF at page ...` link in citation hover cards when the citation maps to a locally archived PDF uploaded through this app.
+- Adds `Open cited PDF` buttons below the answer and an `Open local PDF at page ...` link in citation hover cards when the citation maps to a locally archived PDF uploaded through this app. The answer hover HTML is rendered natively in Streamlit so hover-card links can navigate the app to the PDF viewer.
 - Can fetch cited media bytes by `media_id` when the API returns media citations.
 - Can automatically fetch image media returned by File Search `media_id` and embed browser-displayable thumbnails in citation hover cards.
 - For logged-in admins, can also show a locally archived source-image thumbnail in hover cards when a citation maps back to an image uploaded through this app.
@@ -95,7 +95,17 @@ Fix it by creating or selecting a Gemini API key in Google AI Studio, or by edit
 
 ## Admin Source File Viewing
 
-Google File Search stores are still the retrieval source of truth. The local `.source_files/` archive exists only so an admin can view or download the original uploaded file later. It is not used for chunking, embedding, indexing, retrieval, or answering.
+Google File Search stores are still the retrieval source of truth. The local `.source_files/` archive exists only for source validation and admin download/preview of original uploaded files. It is not used for chunking, embedding, indexing, retrieval, or answering.
+
+Future uploads are archived under:
+
+```text
+.source_files/uploads/<source_id>/<original filename>
+```
+
+Older local archives may still have recorded paths under previous archive folders; the app keeps using the manifest path for those existing records.
+
+Regular users can open a cited locally archived PDF preview from Ask when a citation maps to a PDF uploaded through this app. Browsing the full source archive, downloading originals, and viewing non-PDF archived source files remain admin-only.
 
 Only files uploaded through this app after this feature was added have local `source_id` metadata. Existing File Search documents may still cite text and page numbers, but the app cannot link them to a local original unless they were archived locally during upload.
 
@@ -176,7 +186,7 @@ Metadata filtering narrows what File Search retrieves from the selected store. I
 - Page references depend on Google returning `retrieved_context.page_number`. The app preserves initial-pass page numbers when the optional review pass omits them.
 - When the optional review pass returns thinner grounding metadata, source PDF buttons also fall back to the initial File Search pass so page links are still available when Google returned them initially.
 - If no cited PDF button can be created, the app shows a diagnostic expander explaining whether the problem is missing local archive files, missing source metadata, or missing page numbers.
-- Citation PDF buttons and hover links open the archived PDF at the cited page when the file was uploaded through this app and is still available in `.source_files/`. The native buttons below the answer are the reliable path because hover cards render inside a Streamlit iframe. Exact text/image coordinates are not available unless Google returns location metadata beyond page number.
+- Citation PDF buttons and hover links open the archived PDF at the cited page when the file was uploaded through this app and is still available in `.source_files/`. When opened from a citation link, the app shows the PDF viewer in a right-side panel next to Ask. Exact text/image coordinates are not available unless Google returns location metadata beyond page number.
 - Image hover previews depend on Google returning `media_id` values in grounding metadata, or on the citation metadata mapping to a local archived source image for an admin. File Search can use embedded PDF images for retrieval, but if Google does not return a downloadable `media_id`, the app cannot know which embedded PDF image to display in the hover card.
 - Ask-tab image attachments are prompt context, not File Search documents. They are sent inline to Gemini and are limited to about 18 MB combined in this app to stay below Google's 20 MB inline request guidance.
 

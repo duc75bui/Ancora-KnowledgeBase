@@ -7,7 +7,7 @@ from urllib.parse import urlencode
 import streamlit as st
 import streamlit.components.v1 as components
 
-from src.answer_renderer import estimate_answer_height, render_answer_with_hover
+from src.answer_renderer import render_answer_with_hover
 from src.auth import DEFAULT_ADMIN_PASSWORD, admin_password_from_env, verify_admin_password
 from src.citation_parser import (
     Citation,
@@ -99,28 +99,50 @@ def main() -> None:
 
     stores = load_stores(file_search)
     selected_store_name = render_store_selector(stores, is_admin=is_admin)
-    render_selected_source_viewer(source_registry, selected_store_name, is_admin)
-
-    render_ask_tab(
-        qa_engine,
-        file_search,
-        source_registry,
-        model,
-        selected_store_name,
-        is_admin,
-    )
-
-    if is_admin:
-        render_admin_panel(
-            file_search=file_search,
-            upload_manager=upload_manager,
-            source_registry=source_registry,
-            model_manager=model_manager,
-            approved_models=approved_models,
-            stores=stores,
-            selected_store_name=selected_store_name,
-            api_key=api_key,
+    if has_selected_source_viewer():
+        answer_col, source_col = st.columns([0.56, 0.44], gap="large")
+        with answer_col:
+            render_ask_tab(
+                qa_engine,
+                file_search,
+                source_registry,
+                model,
+                selected_store_name,
+                is_admin,
+            )
+            if is_admin:
+                render_admin_panel(
+                    file_search=file_search,
+                    upload_manager=upload_manager,
+                    source_registry=source_registry,
+                    model_manager=model_manager,
+                    approved_models=approved_models,
+                    stores=stores,
+                    selected_store_name=selected_store_name,
+                    api_key=api_key,
+                )
+        with source_col:
+            render_selected_source_viewer(source_registry, selected_store_name, is_admin)
+    else:
+        render_ask_tab(
+            qa_engine,
+            file_search,
+            source_registry,
+            model,
+            selected_store_name,
+            is_admin,
         )
+        if is_admin:
+            render_admin_panel(
+                file_search=file_search,
+                upload_manager=upload_manager,
+                source_registry=source_registry,
+                model_manager=model_manager,
+                approved_models=approved_models,
+                stores=stores,
+                selected_store_name=selected_store_name,
+                api_key=api_key,
+            )
     render_admin_controls()
 
 
@@ -233,6 +255,10 @@ def render_admin_controls() -> bool:
         else:
             st.sidebar.error("Incorrect admin password")
     return bool(st.session_state.is_admin)
+
+
+def has_selected_source_viewer() -> bool:
+    return bool(_query_param_value(st.query_params.get("source_id")))
 
 
 def load_stores(file_search: FileSearchManager) -> list[Any]:
@@ -702,11 +728,7 @@ def render_ask_tab(
                 image_preview_notes=image_preview_notes,
                 source_view_links=source_view_links,
             )
-            components.html(
-                rendered.html,
-                height=estimate_answer_height(result.text, rendered.span_count),
-                scrolling=True,
-            )
+            st.markdown(rendered.html, unsafe_allow_html=True)
         else:
             st.markdown("_No text returned._")
         render_citation_pdf_open_buttons(
@@ -915,10 +937,6 @@ def render_selected_source_viewer(
         st.query_params.clear()
         st.rerun()
 
-    if not is_admin:
-        st.info("Admin login is required to view locally archived source files.")
-        return
-
     record = source_registry.get(source_id)
     if record is None:
         st.warning("The cited source file is not available in the local archive.")
@@ -926,6 +944,14 @@ def render_selected_source_viewer(
     if selected_store_name and record.file_search_store_name != selected_store_name:
         st.warning("This local source belongs to a different File Search store.")
         return
+    if not is_admin and record.mime_type != "application/pdf":
+        st.info("Admin login is required to view this locally archived source file.")
+        return
+    if not is_admin:
+        st.caption(
+            "Showing a cited PDF preview only. Admin login is required to browse the "
+            "source archive or download original files."
+        )
 
     render_source_record_viewer(
         source_registry=source_registry,
@@ -933,6 +959,7 @@ def render_selected_source_viewer(
         key_prefix=f"linked-source-{record.source_id}",
         page_number=page_number,
         force_pdf_preview=True,
+        allow_download=is_admin,
     )
     st.divider()
 
@@ -1010,6 +1037,7 @@ def render_source_record_viewer(
     key_prefix: str,
     page_number: int | None = None,
     force_pdf_preview: bool = False,
+    allow_download: bool = True,
 ) -> None:
     st.caption(f"Original source: {record.original_filename}")
     try:
@@ -1018,13 +1046,14 @@ def render_source_record_viewer(
         st.error(f"Could not read archived source file: {exc}")
         return
 
-    st.download_button(
-        "Download original source",
-        data=data,
-        file_name=record.original_filename,
-        mime=record.mime_type,
-        key=f"{key_prefix}-download",
-    )
+    if allow_download:
+        st.download_button(
+            "Download original source",
+            data=data,
+            file_name=record.original_filename,
+            mime=record.mime_type,
+            key=f"{key_prefix}-download",
+        )
     if record.mime_type == "application/pdf":
         show_pdf = st.checkbox(
             "Show PDF preview",

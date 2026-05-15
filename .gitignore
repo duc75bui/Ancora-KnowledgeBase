@@ -11,4 +11,5 @@ __pycache__/
 tmp_uploads/
 .source_files/
 .app_config/
+.playwright-mcp/
 *.log

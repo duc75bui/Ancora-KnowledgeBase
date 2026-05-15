@@ -1,8 +1,8 @@
-# ancoraDocs KnowledgeBase v2.17 Deployment Guide
+# ancoraDocs KnowledgeBase v2.19 Deployment Guide
 
 This guide is for deploying the local Streamlit app on a Windows server or internal workstation.
 
-The app is a Python Streamlit service that talks to Google Gemini File Search through the official Google GenAI SDK. Google File Search stores remain the retrieval source of truth. The local `.source_files/` folder is only an admin-viewable archive of original uploads.
+The app is a Python Streamlit service that talks to Google Gemini File Search through the official Google GenAI SDK. Google File Search stores remain the retrieval source of truth. The local `.source_files/` folder stores original uploads for source validation and admin source management.
 
 ## 1. Server Requirements
 
@@ -25,7 +25,8 @@ The app expects to run from this folder because local temporary uploads and sour
 
 Important local folders:
 
-- `.source_files\` stores local original-file archives for admin viewing.
+- `.source_files\` stores local original-file archives for citation validation and admin viewing.
+- `.source_files\uploads\` stores local original files uploaded through this app for cited-source viewing and admin source management.
 - `.tmp_uploads\` stores temporary local upload copies.
 - `.app_config\models.json` stores admin-approved model picker additions.
 - `.app_config\secrets.json` stores the UI-saved Gemini API key if an admin chooses to persist it locally.
@@ -258,8 +259,8 @@ DOCX upload returns MIME type errors:
 - Current app versions let the SDK/API infer upload MIME type from the file path.
 - Make sure the deployed code includes commit `d41b5d3` or later on `iteration-2`.
 
-Users cannot open original source files:
+Users cannot open cited source previews:
 
-- They must log in as admin.
+- Non-admin users can only open cited PDF previews from Ask; admin login is required for downloads, archive browsing, and non-PDF local source viewing.
 - The file must have been uploaded through this app after local source archiving was added.
 - `.source_files\` must still contain the archive entry.

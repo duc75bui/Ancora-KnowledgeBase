@@ -14,6 +14,7 @@ from .validation import safe_display_name
 
 SOURCE_ARCHIVE_DIR = Path(".source_files")
 MANIFEST_FILENAME = "manifest.json"
+SOURCE_UPLOAD_DIRNAME = "uploads"
 
 
 @dataclass(frozen=True)
@@ -43,7 +44,7 @@ class SourceRecord:
 class SourceRegistry:
     def __init__(self, base_dir: Path = SOURCE_ARCHIVE_DIR):
         self.base_dir = base_dir
-        self.sources_dir = self.base_dir / "sources"
+        self.sources_dir = self.base_dir / SOURCE_UPLOAD_DIRNAME
         self.manifest_path = self.base_dir / MANIFEST_FILENAME
 
     def save_source(
