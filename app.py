@@ -14,8 +14,10 @@ from src.config import (
     DEFAULT_MODEL,
     FILE_SEARCH_EMBEDDING_MODEL,
     SUPPORTED_FILE_SEARCH_MODELS,
+    clear_persisted_api_key,
     load_config,
     mask_secret,
+    save_persisted_api_key,
 )
 from src.file_search_manager import (
     FileSearchManager,
@@ -47,7 +49,11 @@ def main() -> None:
 
     config = load_config()
     is_admin = render_admin_controls()
-    api_key = render_api_key_controls(config.api_key, is_admin=is_admin)
+    api_key = render_api_key_controls(
+        config.api_key,
+        api_key_source=config.api_key_source,
+        is_admin=is_admin,
+    )
     model_manager = ModelManager()
     approved_models = model_manager.approved_models()
     model = render_model_controls(approved_models)
@@ -92,18 +98,33 @@ def main() -> None:
         )
 
 
-def render_api_key_controls(env_api_key: str | None, is_admin: bool) -> str | None:
+def render_api_key_controls(
+    loaded_api_key: str | None,
+    api_key_source: str | None,
+    is_admin: bool,
+) -> str | None:
     st.sidebar.header("Connection")
     if "session_api_key" not in st.session_state:
         st.session_state.session_api_key = None
 
-    if env_api_key:
-        st.session_state.session_api_key = env_api_key
-        st.sidebar.text_input("Gemini API key", value=mask_secret(env_api_key), disabled=True)
-        st.sidebar.success("Connected with GEMINI_API_KEY from .env")
+    if loaded_api_key:
+        st.session_state.session_api_key = loaded_api_key
+        st.sidebar.text_input("Gemini API key", value=mask_secret(loaded_api_key), disabled=True)
+        if api_key_source == "local":
+            st.sidebar.success("Connected with saved local API key")
+        else:
+            st.sidebar.success("Connected with GEMINI_API_KEY from `.env` or the environment")
         if is_admin:
-            st.sidebar.caption("To rotate this key, update `.env` and restart the app.")
-        return env_api_key
+            if api_key_source == "local":
+                st.sidebar.caption("This key is saved on this server in `.app_config/secrets.json`.")
+                if st.sidebar.button("Change saved API key"):
+                    clear_persisted_api_key()
+                    st.session_state.session_api_key = None
+                    cached_client.clear()
+                    st.rerun()
+            else:
+                st.sidebar.caption("To rotate this key, update `.env` or the server environment.")
+        return loaded_api_key
 
     session_api_key = st.session_state.get("session_api_key")
     if session_api_key:
@@ -122,7 +143,14 @@ def render_api_key_controls(env_api_key: str | None, is_admin: bool) -> str | No
         return None
 
     entered = st.sidebar.text_input("Gemini API key", type="password")
+    remember_key = st.sidebar.checkbox("Remember API key on this server", value=True)
     if st.sidebar.button("Connect API key", disabled=not entered):
+        if remember_key:
+            try:
+                save_persisted_api_key(entered)
+            except ValueError as exc:
+                st.sidebar.error(str(exc))
+                return None
         st.session_state.session_api_key = entered.strip()
         cached_client.clear()
         st.rerun()

@@ -35,7 +35,7 @@ GEMINI_API_KEY=your-gemini-api-key
 ADMIN_PASSWORD=admin123
 ```
 
-You can also leave `.env` unset and have an admin connect the key in the Streamlit sidebar for that browser session. The app never hardcodes or prints the full API key.
+You can also leave `.env` unset and have an admin connect the key in the Streamlit sidebar. By default, the app saves that key locally in `.app_config/secrets.json` so it survives app/browser restarts. The app never hardcodes or prints the full API key.
 
 `ADMIN_PASSWORD` controls access to locally archived original files. The default `admin123` is only for local testing.
 

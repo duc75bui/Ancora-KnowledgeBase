@@ -1,4 +1,12 @@
-from src.config import format_api_error, load_config, mask_secret, sanitize_error
+from src.config import (
+    clear_persisted_api_key,
+    format_api_error,
+    load_config,
+    load_persisted_api_key,
+    mask_secret,
+    sanitize_error,
+    save_persisted_api_key,
+)
 
 
 def test_load_config_reads_gemini_api_key(monkeypatch, tmp_path):
@@ -9,6 +17,31 @@ def test_load_config_reads_gemini_api_key(monkeypatch, tmp_path):
     config = load_config(env_file)
 
     assert config.api_key == "abc123456789"
+    assert config.api_key_source == "environment"
+
+
+def test_load_config_reads_persisted_api_key_when_env_missing(monkeypatch, tmp_path):
+    secrets_file = tmp_path / "secrets.json"
+    save_persisted_api_key("persisted-key", secrets_file)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setattr("src.config.LOCAL_SECRETS_PATH", secrets_file)
+
+    config = load_config(tmp_path / "missing.env")
+
+    assert config.api_key == "persisted-key"
+    assert config.api_key_source == "local"
+
+
+def test_persisted_api_key_save_load_and_clear(tmp_path):
+    secrets_file = tmp_path / "secrets.json"
+
+    save_persisted_api_key("abc123", secrets_file)
+
+    assert load_persisted_api_key(secrets_file) == "abc123"
+
+    clear_persisted_api_key(secrets_file)
+
+    assert load_persisted_api_key(secrets_file) is None
 
 
 def test_mask_secret_hides_middle():

@@ -28,6 +28,7 @@ Important local folders:
 - `.source_files\` stores local original-file archives for admin viewing.
 - `.tmp_uploads\` stores temporary local upload copies.
 - `.app_config\models.json` stores admin-approved model picker additions.
+- `.app_config\secrets.json` stores the UI-saved Gemini API key if an admin chooses to persist it locally.
 - `.venv\` stores the Python virtual environment.
 
 These folders are intentionally not committed to git.
@@ -171,6 +172,7 @@ The built-in `ADMIN_PASSWORD` only controls access to local archived source file
 Back up:
 
 - `.env`
+- `.app_config\secrets.json` if the API key is saved through the UI
 - `.source_files\`
 - `.app_config\`
 - optionally `.tmp_uploads\` if needed for troubleshooting
