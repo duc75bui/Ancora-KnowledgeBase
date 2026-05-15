@@ -44,7 +44,12 @@ from src.metadata import (
 )
 from src.model_manager import ModelInfo, ModelManager, ModelManagerError, default_model_from
 from src.qa_engine import ANSWER_STYLE_INSTRUCTIONS, DEFAULT_ANSWER_STYLE, QAEngine, QueryImage
-from src.source_registry import SourceRecord, SourceRegistry, source_id_from_custom_metadata
+from src.source_registry import (
+    SourceRecord,
+    SourceRegistry,
+    metadata_string_value,
+    source_id_from_custom_metadata,
+)
 from src.upload_manager import UploadManager
 from src.validation import accepted_extensions, safe_display_name, validate_file
 
@@ -823,24 +828,31 @@ def render_citation_pdf_open_buttons(
         citations,
         file_search_store_name,
     )
-    if not targets:
+    if targets:
+        st.markdown("#### Source PDF")
+        for target in targets:
+            page_number = target.get("page_number")
+            title = target.get("title") or "PDF source"
+            label = f"Open citation {target['citation_index']} PDF"
+            if page_number:
+                label = f"{label} at page {page_number}"
+            if st.button(label, key=f"open-source-{target['citation_index']}-{target['source_id']}"):
+                st.query_params["source_id"] = str(target["source_id"])
+                if page_number:
+                    st.query_params["page"] = str(page_number)
+                elif "page" in st.query_params:
+                    del st.query_params["page"]
+                st.rerun()
+            st.caption(title)
+        missing_pages = [target for target in targets if not target.get("page_number")]
+        if missing_pages:
+            st.caption("Some cited PDFs can be opened, but Google did not return page numbers for them.")
         return
 
-    st.markdown("#### Source PDF")
-    for target in targets:
-        page_number = target.get("page_number")
-        title = target.get("title") or "PDF source"
-        label = f"Open citation {target['citation_index']} PDF"
-        if page_number:
-            label = f"{label} at page {page_number}"
-        if st.button(label, key=f"open-source-{target['citation_index']}-{target['source_id']}"):
-            st.query_params["source_id"] = str(target["source_id"])
-            if page_number:
-                st.query_params["page"] = str(page_number)
-            elif "page" in st.query_params:
-                del st.query_params["page"]
-            st.rerun()
-        st.caption(title)
+    if citations:
+        with st.expander("Why no cited PDF button is shown"):
+            for line in citation_pdf_link_diagnostics(source_registry, citations, file_search_store_name):
+                st.write(f"- {line}")
 
 
 def render_search_entry_point(raw_response: Any) -> None:
@@ -1198,6 +1210,41 @@ def citation_source_view_targets(
     return targets
 
 
+def citation_pdf_link_diagnostics(
+    source_registry: SourceRegistry,
+    citations: list[Citation],
+    file_search_store_name: str | None,
+) -> list[str]:
+    pdf_records = [
+        record
+        for record in source_registry.list_records(file_search_store_name)
+        if record.mime_type == "application/pdf"
+    ]
+    if not pdf_records:
+        return [
+            "No PDFs are available in this app's local source archive for the selected store.",
+            "PDF links only work for files uploaded through this app after local source archiving was added.",
+            "On Streamlit Cloud, local `.source_files/` content is not the same as your local machine and may be empty after redeploys.",
+        ]
+
+    lines = [
+        f"Found {len(pdf_records)} archived PDF(s) for the selected store, but none matched the returned citation metadata.",
+    ]
+    for index, citation in enumerate(citations[:5], start=1):
+        source_id = source_id_from_custom_metadata(citation.custom_metadata)
+        metadata_filename = metadata_string_value(citation.custom_metadata, "source_filename")
+        page = citation.page_number if citation.page_number is not None else "not returned"
+        title = citation.title or citation.uri or citation.media_id or "untitled citation"
+        lines.append(
+            f"Citation {index}: title={title!r}, source_id={source_id or 'not returned'}, "
+            f"source_filename={metadata_filename or 'not returned'}, page={page}."
+        )
+    lines.append(
+        "To create reliable PDF links, upload the PDF through this app's Admin Upload tab so File Search receives source_id metadata and the app archives the original PDF."
+    )
+    return lines
+
+
 def _citation_identity(citation: Citation) -> tuple[str, str, int | None]:
     source_id = source_id_from_custom_metadata(citation.custom_metadata)
     if source_id:
@@ -1219,7 +1266,15 @@ def _citation_source_record(
     source_id = source_id_from_custom_metadata(citation.custom_metadata)
     record = source_registry.get(source_id) if source_id else None
     if record is None:
-        record = source_registry.find_by_filename(citation.title, file_search_store_name)
+        metadata_filename = metadata_string_value(citation.custom_metadata, "source_filename")
+        for reference in (
+            metadata_filename,
+            citation.title,
+            citation.uri,
+        ):
+            record = source_registry.find_by_reference(reference, file_search_store_name)
+            if record is not None:
+                break
     return record
 
 

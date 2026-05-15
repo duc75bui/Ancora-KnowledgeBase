@@ -1,4 +1,4 @@
-# ancoraDocs KnowledgeBase v2.16
+# ancoraDocs KnowledgeBase v2.17
 
 This is a basic local Streamlit app for Retrieval Augmented Generation with the Google Gemini File Search API. It uses Google File Search stores as the source of truth: Google imports files, chunks them, creates embeddings, indexes content, retrieves relevant chunks, returns grounding metadata, and manages File Search documents.
 
@@ -175,6 +175,7 @@ Metadata filtering narrows what File Search retrieves from the selected store. I
 - Google File Search currently documents multimodal image support for PNG and JPEG. The hover renderer can display common browser-safe raster formats if Google returns those bytes or if an admin views a locally archived image, but File Search ingestion is still limited by Google's supported formats.
 - Page references depend on Google returning `retrieved_context.page_number`. The app preserves initial-pass page numbers when the optional review pass omits them.
 - When the optional review pass returns thinner grounding metadata, source PDF buttons also fall back to the initial File Search pass so page links are still available when Google returned them initially.
+- If no cited PDF button can be created, the app shows a diagnostic expander explaining whether the problem is missing local archive files, missing source metadata, or missing page numbers.
 - Citation PDF buttons and hover links open the archived PDF at the cited page when the file was uploaded through this app and is still available in `.source_files/`. The native buttons below the answer are the reliable path because hover cards render inside a Streamlit iframe. Exact text/image coordinates are not available unless Google returns location metadata beyond page number.
 - Image hover previews depend on Google returning `media_id` values in grounding metadata, or on the citation metadata mapping to a local archived source image for an admin. File Search can use embedded PDF images for retrieval, but if Google does not return a downloadable `media_id`, the app cannot know which embedded PDF image to display in the hover card.
 - Ask-tab image attachments are prompt context, not File Search documents. They are sent inline to Gemini and are limited to about 18 MB combined in this app to stay below Google's 20 MB inline request guidance.

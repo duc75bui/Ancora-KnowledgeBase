@@ -70,3 +70,17 @@ def test_find_by_filename_returns_none_for_ambiguous_matches(tmp_path):
         )
 
     assert registry.find_by_filename("diagram.png", "fileSearchStores/store-1") is None
+
+
+def test_find_by_reference_matches_filename_stem_and_metadata(tmp_path):
+    registry = SourceRegistry(tmp_path)
+    record = registry.save_source(
+        filename="System Architecture.pdf",
+        data=b"%PDF data",
+        mime_type="application/pdf",
+        file_search_store_name="fileSearchStores/store-1",
+        custom_metadata=[{"key": "document_title", "string_value": "Architecture Guide"}],
+    )
+
+    assert registry.find_by_reference("system architecture", "fileSearchStores/store-1") == record
+    assert registry.find_by_reference("Architecture Guide", "fileSearchStores/store-1") == record

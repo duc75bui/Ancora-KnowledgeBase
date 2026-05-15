@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 FILE_SEARCH_EMBEDDING_MODEL = "models/gemini-embedding-2"
 DEFAULT_MODEL = "gemini-3-flash-preview"
 TEMP_UPLOAD_DIR = Path(".tmp_uploads")
-APP_VERSION = "2.16"
+APP_VERSION = "2.17"
 APP_NAME = f"ancoraDocs KnowledgeBase v{APP_VERSION}"
 APP_CONFIG_DIR = Path(".app_config")
 LOCAL_SECRETS_PATH = APP_CONFIG_DIR / "secrets.json"

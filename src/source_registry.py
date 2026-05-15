@@ -113,6 +113,23 @@ class SourceRegistry:
             return matches[0]
         return None
 
+    def find_by_reference(
+        self,
+        reference: str | None,
+        file_search_store_name: str | None = None,
+    ) -> SourceRecord | None:
+        if not reference:
+            return None
+        normalized = normalize_reference(reference)
+        matches = [
+            record
+            for record in self.list_records(file_search_store_name)
+            if normalized in record_reference_values(record)
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        return None
+
     def delete_source(self, source_id: str) -> bool:
         record = self.get(source_id)
         if record is None:
@@ -169,5 +186,39 @@ def source_id_from_custom_metadata(metadata: list[dict[str, object]] | None) -> 
     return None
 
 
+def metadata_string_value(metadata: list[dict[str, object]] | None, key: str) -> str | None:
+    if not metadata:
+        return None
+    for item in metadata:
+        if item.get("key") != key:
+            continue
+        value = item.get("string_value") or item.get("stringValue")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def record_reference_values(record: SourceRecord) -> set[str]:
+    values = _reference_variants(record.original_filename)
+    for item in record.custom_metadata or []:
+        value = item.get("string_value") or item.get("stringValue")
+        if isinstance(value, str):
+            values.update(_reference_variants(value))
+    return values
+
+
 def normalize_filename(filename: str) -> str:
     return safe_display_name(filename).strip().casefold()
+
+
+def normalize_reference(value: str) -> str:
+    return normalize_filename(value)
+
+
+def _reference_variants(value: str) -> set[str]:
+    normalized = normalize_reference(value)
+    variants = {normalized}
+    path = Path(normalized)
+    if path.suffix:
+        variants.add(path.with_suffix("").name)
+    return {item for item in variants if item}
