@@ -1,4 +1,4 @@
-# ancoraDocs KnowledgeBase v2.20
+# ancoraDocs KnowledgeBase v2.21
 
 This is a basic local Streamlit app for Retrieval Augmented Generation with the Google Gemini File Search API. It uses Google File Search stores as the source of truth: Google imports files, chunks them, creates embeddings, indexes content, retrieves relevant chunks, returns grounding metadata, and manages File Search documents.
 
@@ -87,7 +87,7 @@ Fix it by creating or selecting a Gemini API key in Google AI Studio, or by edit
 - Lets the user attach optional query-context images in the Ask tab using Gemini inline image input. Supported image input formats are PNG, JPEG, WebP, HEIC, and HEIF.
 - Displays answers, citations, page numbers, media IDs, custom metadata, grounding supports, and raw grounding metadata when returned.
 - Highlights answer spans when Google returns `groundingSupports`; hover or focus the highlighted text to inspect the retrieved snippet, source title, page number, and optional image preview.
-- Keeps a cited-source panel visible next to Ask. `Source PDF` buttons and `Show page ... in source panel` hover links update that panel when the citation maps to a locally archived PDF uploaded through this app.
+- Keeps a cited-source panel visible next to Ask. `Source PDF` buttons and same-page `Show page ... in source panel` hover actions update that panel when the citation maps to a locally archived PDF uploaded through this app.
 - Can fetch cited media bytes by `media_id` when the API returns media citations.
 - Can automatically fetch image media returned by File Search `media_id` and embed browser-displayable thumbnails in citation hover cards.
 - For logged-in admins, can also show a locally archived source-image thumbnail in hover cards when a citation maps back to an image uploaded through this app.
@@ -187,6 +187,7 @@ Metadata filtering narrows what File Search retrieves from the selected store. I
 - When the optional review pass returns thinner grounding metadata, source PDF buttons also fall back to the initial File Search pass so page links are still available when Google returned them initially.
 - If no cited PDF button can be created, the app shows a diagnostic expander explaining whether the problem is missing local archive files, missing source metadata, or missing page numbers.
 - Citation PDF buttons and hover links update the right-side source panel to the archived PDF page when the file was uploaded through this app and is still available in `.source_files/`. The last question, answer, and citations stay on screen while the source panel changes. Exact text/image coordinates are not available unless Google returns location metadata beyond page number.
+- Hover source actions are rendered as same-page form buttons instead of normal links, so they do not intentionally open a new browser tab/window.
 - Answer restore for citation links uses a short-lived in-memory server cache keyed by an `answer_id` in the citation URL. Restarting Streamlit clears that answer cache.
 - Image hover previews depend on Google returning `media_id` values in grounding metadata, or on the citation metadata mapping to a local archived source image for an admin. File Search can use embedded PDF images for retrieval, but if Google does not return a downloadable `media_id`, the app cannot know which embedded PDF image to display in the hover card.
 - Ask-tab image attachments are prompt context, not File Search documents. They are sent inline to Gemini and are limited to about 18 MB combined in this app to stay below Google's 20 MB inline request guidance.

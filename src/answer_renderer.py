@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 from dataclasses import dataclass
+from urllib.parse import parse_qsl
 
 from .citation_parser import Citation, GroundingResult
 
@@ -182,19 +183,44 @@ def _source_view_link_html(citation: Citation, source_view_links: dict[str, str]
     source_id = _custom_metadata_string_value(citation.custom_metadata, "source_id")
     link = None
     if source_id:
-        link = source_view_links.get(source_id)
+        link = source_view_links.get(_source_view_link_key("source_id", source_id, citation.page_number))
+        if not link:
+            link = source_view_links.get(source_id)
     if not link and citation.title:
-        link = source_view_links.get(citation.title)
+        link = source_view_links.get(_source_view_link_key("title", citation.title, citation.page_number))
+        if not link:
+            link = source_view_links.get(citation.title)
     if not link:
         return ""
     label = "Show PDF in source panel"
     if citation.page_number is not None:
         label = f"Show page {citation.page_number} in source panel"
+    return _source_view_form_html(link, label)
+
+
+def _source_view_link_key(kind: str, value: str, page_number: int | None) -> str:
+    page = "" if page_number is None else str(page_number)
+    return f"{kind}:{value}:{page}"
+
+
+def _source_view_form_html(link: str, label: str) -> str:
+    query = link[1:] if link.startswith("?") else link
+    fields = parse_qsl(query, keep_blank_values=True)
+    if not fields:
+        return ""
+    inputs = "".join(
+        '<input type="hidden" '
+        f'name="{html.escape(name, quote=True)}" '
+        f'value="{html.escape(value, quote=True)}">'
+        for name, value in fields
+    )
     return (
-        '<a class="tooltip-source-link" '
-        f'href="{html.escape(link, quote=True)}" '
+        '<form class="tooltip-source-form" method="get">'
+        f"{inputs}"
+        '<button class="tooltip-source-link" type="submit">'
         f"{html.escape(label)}"
-        "</a>"
+        "</button>"
+        "</form>"
     )
 
 
@@ -313,13 +339,22 @@ def _style_block() -> str:
   line-height: 1.45;
   margin: 8px 0;
 }
+.tooltip-source-form {
+  display: block;
+  margin: 6px 0 8px;
+}
 .tooltip-source-link {
+  appearance: none;
+  background: transparent;
+  border: 0;
   color: #93c5fd;
   display: inline-block;
   font-size: 12px;
   font-weight: 700;
-  margin: 6px 0 8px;
+  margin: 0;
+  padding: 0;
   text-decoration: underline;
+  cursor: pointer;
 }
 .citation-note {
   color: #64748b;

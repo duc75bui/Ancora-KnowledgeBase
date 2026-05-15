@@ -172,7 +172,10 @@ def test_render_answer_can_link_to_local_pdf_source_viewer():
     )
 
     assert "Show page 5 in source panel" in rendered.html
-    assert "?source_id=source-1&amp;page=5" in rendered.html
+    assert '<form class="tooltip-source-form" method="get">' in rendered.html
+    assert 'name="source_id" value="source-1"' in rendered.html
+    assert 'name="page" value="5"' in rendered.html
+    assert "href=" not in rendered.html
     assert "target=" not in rendered.html
 
 

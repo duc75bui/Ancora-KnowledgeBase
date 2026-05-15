@@ -1305,10 +1305,17 @@ def citation_source_view_links(
         if answer_id:
             params["answer_id"] = answer_id
         link = f"?{urlencode(params)}"
-        links[record.source_id] = link
+        links[citation_source_link_key("source_id", record.source_id, citation.page_number)] = link
+        links.setdefault(record.source_id, link)
         if citation.title:
+            links[citation_source_link_key("title", citation.title, citation.page_number)] = link
             links.setdefault(citation.title, link)
     return links
+
+
+def citation_source_link_key(kind: str, value: str, page_number: int | None) -> str:
+    page = "" if page_number is None else str(page_number)
+    return f"{kind}:{value}:{page}"
 
 
 def combined_source_citations(

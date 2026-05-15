@@ -1,4 +1,4 @@
-# ancoraDocs KnowledgeBase v2.20 Deployment Guide
+# ancoraDocs KnowledgeBase v2.21 Deployment Guide
 
 This guide is for deploying the local Streamlit app on a Windows server or internal workstation.
 
