@@ -137,10 +137,15 @@ def _media_preview_html(
         if source_id and source_id in source_image_data_urls:
             label = "Archived source image"
             data_url = source_image_data_urls[source_id]
+        elif citation.title and citation.title in source_image_data_urls:
+            label = "Archived source image matched by filename"
+            data_url = source_image_data_urls[citation.title]
         elif citation.media_id:
             note = image_preview_notes.get(citation.media_id)
         elif source_id:
             note = image_preview_notes.get(source_id)
+        elif citation.title:
+            note = image_preview_notes.get(citation.title)
 
     if not data_url:
         if note:

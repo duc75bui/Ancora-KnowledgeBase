@@ -37,3 +37,34 @@ def test_source_registry_deletes_file_and_manifest_record(tmp_path):
 
 def test_source_id_from_camel_case_metadata():
     assert source_id_from_custom_metadata([{"key": "source_id", "stringValue": "abc"}]) == "abc"
+
+
+def test_find_by_filename_matches_single_record_in_store(tmp_path):
+    registry = SourceRegistry(tmp_path)
+    record = registry.save_source(
+        filename="Deployment Diagram 2.png",
+        data=b"\x89PNG\r\n\x1a\nimage",
+        mime_type="image/png",
+        file_search_store_name="fileSearchStores/store-1",
+    )
+    registry.save_source(
+        filename="Deployment Diagram 2.png",
+        data=b"\x89PNG\r\n\x1a\nimage",
+        mime_type="image/png",
+        file_search_store_name="fileSearchStores/store-2",
+    )
+
+    assert registry.find_by_filename("deployment diagram 2.PNG", "fileSearchStores/store-1") == record
+
+
+def test_find_by_filename_returns_none_for_ambiguous_matches(tmp_path):
+    registry = SourceRegistry(tmp_path)
+    for _ in range(2):
+        registry.save_source(
+            filename="diagram.png",
+            data=b"\x89PNG\r\n\x1a\nimage",
+            mime_type="image/png",
+            file_search_store_name="fileSearchStores/store-1",
+        )
+
+    assert registry.find_by_filename("diagram.png", "fileSearchStores/store-1") is None

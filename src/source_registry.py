@@ -89,6 +89,23 @@ class SourceRegistry:
                 return record
         return None
 
+    def find_by_filename(
+        self,
+        filename: str | None,
+        file_search_store_name: str | None = None,
+    ) -> SourceRecord | None:
+        if not filename:
+            return None
+        normalized = normalize_filename(filename)
+        matches = [
+            record
+            for record in self.list_records(file_search_store_name)
+            if normalize_filename(record.original_filename) == normalized
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        return None
+
     def delete_source(self, source_id: str) -> bool:
         record = self.get(source_id)
         if record is None:
@@ -143,3 +160,7 @@ def source_id_from_custom_metadata(metadata: list[dict[str, object]] | None) -> 
         if isinstance(value, str):
             return value
     return None
+
+
+def normalize_filename(filename: str) -> str:
+    return safe_display_name(filename).strip().casefold()

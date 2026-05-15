@@ -308,6 +308,7 @@ def render_ask_tab(
             source_image_data_urls = citation_source_image_data_urls(
                 source_registry,
                 result.grounding.citations,
+                file_search_store_name=selected_store_name,
                 is_admin=is_admin,
             )
         if result.text:
@@ -568,6 +569,7 @@ def image_preview_notes_for_citations(
 def citation_source_image_data_urls(
     source_registry: SourceRegistry,
     citations: list[Citation],
+    file_search_store_name: str,
     is_admin: bool,
 ) -> dict[str, str]:
     if not is_admin:
@@ -576,10 +578,15 @@ def citation_source_image_data_urls(
     source_data_urls: dict[str, str] = {}
     for citation in citations:
         source_id = source_id_from_custom_metadata(citation.custom_metadata)
-        if not source_id or source_id in source_data_urls:
+        record = source_registry.get(source_id) if source_id else None
+        if record is None:
+            record = source_registry.find_by_filename(
+                citation.title,
+                file_search_store_name=file_search_store_name,
+            )
+        if record is None or record.source_id in source_data_urls:
             continue
-        record = source_registry.get(source_id)
-        if record is None or not record.mime_type.startswith("image/"):
+        if not record.mime_type.startswith("image/"):
             continue
         try:
             data = source_registry.file_bytes(record)
@@ -588,7 +595,9 @@ def citation_source_image_data_urls(
             continue
         data_url = data_url_for_displayable_image(data, record.mime_type)
         if data_url:
-            source_data_urls[source_id] = data_url
+            source_data_urls[record.source_id] = data_url
+            if citation.title:
+                source_data_urls[citation.title] = data_url
     return source_data_urls
 
 
