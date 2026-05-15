@@ -24,6 +24,7 @@ from src.file_search_manager import (
     object_to_dict,
 )
 from src.gemini_client import GeminiClientError, create_client
+from src.media_utils import data_url_for_displayable_image
 from src.qa_engine import QAEngine
 from src.source_registry import SourceRecord, SourceRegistry, source_id_from_custom_metadata
 from src.upload_manager import UploadManager
@@ -293,13 +294,20 @@ def render_ask_tab(
 
         st.markdown("### Answer")
         media_data_urls = {}
+        source_image_data_urls = {}
         if include_media_previews:
             media_data_urls = citation_media_data_urls(file_search, result.grounding.citations)
+            source_image_data_urls = citation_source_image_data_urls(
+                source_registry,
+                result.grounding.citations,
+                is_admin=is_admin,
+            )
         if result.text:
             rendered = render_answer_with_hover(
                 result.text,
                 result.grounding,
                 media_data_urls=media_data_urls,
+                source_image_data_urls=source_image_data_urls,
             )
             components.html(
                 rendered.html,
@@ -516,20 +524,37 @@ def citation_media_data_urls(
         except GeminiAPIError as exc:
             st.warning(f"Could not fetch cited media preview: {exc}")
             continue
-        mime_type = infer_image_mime_type(media)
-        if not mime_type:
-            continue
-        encoded = base64.b64encode(media).decode("ascii")
-        media_data_urls[citation.media_id] = f"data:{mime_type};base64,{encoded}"
+        data_url = data_url_for_displayable_image(media)
+        if data_url:
+            media_data_urls[citation.media_id] = data_url
     return media_data_urls
 
 
-def infer_image_mime_type(data: bytes) -> str | None:
-    if data.startswith(b"\x89PNG\r\n\x1a\n"):
-        return "image/png"
-    if data.startswith(b"\xff\xd8\xff"):
-        return "image/jpeg"
-    return None
+def citation_source_image_data_urls(
+    source_registry: SourceRegistry,
+    citations: list[Citation],
+    is_admin: bool,
+) -> dict[str, str]:
+    if not is_admin:
+        return {}
+
+    source_data_urls: dict[str, str] = {}
+    for citation in citations:
+        source_id = source_id_from_custom_metadata(citation.custom_metadata)
+        if not source_id or source_id in source_data_urls:
+            continue
+        record = source_registry.get(source_id)
+        if record is None or not record.mime_type.startswith("image/"):
+            continue
+        try:
+            data = source_registry.file_bytes(record)
+        except OSError as exc:
+            st.warning(f"Could not read archived image source preview: {exc}")
+            continue
+        data_url = data_url_for_displayable_image(data, record.mime_type)
+        if data_url:
+            source_data_urls[source_id] = data_url
+    return source_data_urls
 
 
 def _store_label(name: str, stores: list[Any]) -> str:

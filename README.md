@@ -72,7 +72,8 @@ Fix it by creating or selecting a Gemini API key in Google AI Studio, or by edit
 - Displays answers, citations, page numbers, media IDs, custom metadata, grounding supports, and raw grounding metadata when returned.
 - Highlights answer spans when Google returns `groundingSupports`; hover or focus the highlighted text to inspect the retrieved snippet, source title, page number, and optional image preview.
 - Can fetch cited media bytes by `media_id` when the API returns media citations.
-- Can automatically fetch PNG/JPEG media returned by File Search `media_id` and embed those images in citation hover cards.
+- Can automatically fetch image media returned by File Search `media_id` and embed browser-displayable thumbnails in citation hover cards.
+- For logged-in admins, can also show a locally archived source-image thumbnail in hover cards when a citation maps back to an image uploaded through this app.
 - Lets logged-in admins download or preview locally archived source PDFs/images/text files from citation details and the Documents tab.
 
 ## Admin Source File Viewing
@@ -129,7 +130,8 @@ According to the official guide, raw `File` objects uploaded through the File AP
 - Original-file viewing is only available for local files uploaded through this app after source archiving was added.
 - PDF previews are embedded as browser data URLs; large PDFs may be better downloaded than previewed inline.
 - Citation hover depends on Google returning `groundingSupports` span metadata. If no span metadata is returned, the app still shows the citation list and raw grounding metadata.
-- Image hover previews depend on Google returning `media_id` values in grounding metadata. The app only embeds returned PNG/JPEG media in hover cards.
+- Google File Search currently documents multimodal image support for PNG and JPEG. The hover renderer can display common browser-safe raster formats if Google returns those bytes or if an admin views a locally archived image, but File Search ingestion is still limited by Google's supported formats.
+- Image hover previews depend on Google returning `media_id` values in grounding metadata, or on the citation metadata mapping to a local archived source image for an admin. If a PDF contains an embedded image but Google does not return a `media_id`, the app cannot know which embedded image to display in the hover card.
 
 ## Tests
 

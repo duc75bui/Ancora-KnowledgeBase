@@ -77,3 +77,36 @@ def test_render_answer_can_embed_image_media_preview_in_hover():
 
     assert "tooltip-media" in rendered.html
     assert "data:image/png;base64,abc123" in rendered.html
+    assert "Exact cited image chunk" in rendered.html
+
+
+def test_render_answer_can_embed_admin_source_image_preview_in_hover():
+    grounding = GroundingResult(
+        citations=[
+            Citation(
+                title="uploaded-image.png",
+                text="The image shows the serial number.",
+                custom_metadata=[{"key": "source_id", "string_value": "source-1"}],
+            )
+        ],
+        grounding_supports=[],
+        support_spans=[
+            GroundingSupportSpan(
+                start_index=0,
+                end_index=9,
+                text="The image",
+                citation_indices=[0],
+            )
+        ],
+        raw_grounding_metadata=None,
+    )
+
+    rendered = render_answer_with_hover(
+        "The image shows the serial number.",
+        grounding,
+        source_image_data_urls={"source-1": "data:image/png;base64,sourcebytes"},
+    )
+
+    assert "tooltip-media" in rendered.html
+    assert "Archived source image" in rendered.html
+    assert "data:image/png;base64,sourcebytes" in rendered.html

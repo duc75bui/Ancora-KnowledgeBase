@@ -16,8 +16,10 @@ def render_answer_with_hover(
     answer_text: str,
     grounding: GroundingResult,
     media_data_urls: dict[str, str] | None = None,
+    source_image_data_urls: dict[str, str] | None = None,
 ) -> RenderedAnswer:
     media_data_urls = media_data_urls or {}
+    source_image_data_urls = source_image_data_urls or {}
     spans = sorted(
         grounding.support_spans,
         key=lambda item: (item.start_index, item.end_index),
@@ -39,7 +41,12 @@ def render_answer_with_hover(
     for span in valid_spans:
         parts.append(_format_text(answer_text[cursor : span.start_index]))
         span_text = answer_text[span.start_index : span.end_index]
-        tooltip = _tooltip_html(span.citation_indices, grounding.citations, media_data_urls)
+        tooltip = _tooltip_html(
+            span.citation_indices,
+            grounding.citations,
+            media_data_urls,
+            source_image_data_urls,
+        )
         label = _citation_label(span.citation_indices)
         parts.append(
             '<span class="citation-span" tabindex="0">'
@@ -71,6 +78,7 @@ def _tooltip_html(
     indices: list[int],
     citations: list[Citation],
     media_data_urls: dict[str, str],
+    source_image_data_urls: dict[str, str],
 ) -> str:
     if not indices:
         return '<span class="tooltip-title">Grounding metadata</span><span>No citation index was returned.</span>'
@@ -87,13 +95,7 @@ def _tooltip_html(
         if citation.file_search_store:
             meta_bits.append(citation.file_search_store)
         snippet = _compact(citation.text or "")
-        media_preview = ""
-        if citation.media_id and citation.media_id in media_data_urls:
-            media_preview = (
-                '<img class="tooltip-media" '
-                f'src="{html.escape(media_data_urls[citation.media_id], quote=True)}" '
-                f'alt="{html.escape(title, quote=True)}">'
-            )
+        media_preview = _media_preview_html(citation, title, media_data_urls, source_image_data_urls)
         sections.append(
             '<span class="tooltip-section">'
             f'<span class="tooltip-title">{html.escape(title)}</span>'
@@ -105,6 +107,50 @@ def _tooltip_html(
     if not sections:
         return '<span class="tooltip-title">Grounding metadata</span><span>Citation details were not returned.</span>'
     return "".join(sections)
+
+
+def _media_preview_html(
+    citation: Citation,
+    title: str,
+    media_data_urls: dict[str, str],
+    source_image_data_urls: dict[str, str],
+) -> str:
+    label = None
+    data_url = None
+    if citation.media_id and citation.media_id in media_data_urls:
+        label = "Exact cited image chunk"
+        data_url = media_data_urls[citation.media_id]
+    else:
+        source_id = _custom_metadata_string_value(citation.custom_metadata, "source_id")
+        if source_id and source_id in source_image_data_urls:
+            label = "Archived source image"
+            data_url = source_image_data_urls[source_id]
+
+    if not data_url:
+        return ""
+    return (
+        '<span class="tooltip-image-label">'
+        f"{html.escape(label or 'Image preview')}"
+        "</span>"
+        '<img class="tooltip-media" '
+        f'src="{html.escape(data_url, quote=True)}" '
+        f'alt="{html.escape(title, quote=True)}">'
+    )
+
+
+def _custom_metadata_string_value(
+    metadata: list[dict[str, object]] | None,
+    key: str,
+) -> str | None:
+    if not metadata:
+        return None
+    for item in metadata:
+        if item.get("key") != key:
+            continue
+        value = item.get("string_value") or item.get("stringValue")
+        if isinstance(value, str):
+            return value
+    return None
 
 
 def _compact(text: str, limit: int = 520) -> str:
@@ -189,9 +235,16 @@ def _style_block() -> str:
   border-radius: 6px;
   display: block;
   margin: 8px 0;
-  max-height: 240px;
+  max-height: 280px;
   max-width: 100%;
   object-fit: contain;
+}
+.tooltip-image-label {
+  color: #fde68a;
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  margin-top: 8px;
 }
 .citation-note {
   color: #64748b;
