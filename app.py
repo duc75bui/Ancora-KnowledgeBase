@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-import json
+import base64
 from typing import Any
 
 import streamlit as st
+import streamlit.components.v1 as components
 
+from src.answer_renderer import estimate_answer_height, render_answer_with_hover
+from src.auth import DEFAULT_ADMIN_PASSWORD, admin_password_from_env, verify_admin_password
 from src.citation_parser import Citation, to_plain_data
 from src.config import (
     DEFAULT_MODEL,
@@ -22,6 +25,7 @@ from src.file_search_manager import (
 )
 from src.gemini_client import GeminiClientError, create_client
 from src.qa_engine import QAEngine
+from src.source_registry import SourceRecord, SourceRegistry, source_id_from_custom_metadata
 from src.upload_manager import UploadManager
 from src.validation import accepted_extensions, safe_display_name, validate_file
 
@@ -41,6 +45,7 @@ def main() -> None:
     config = load_config()
     api_key = render_api_key_controls(config.api_key)
     model = render_model_controls()
+    is_admin = render_admin_controls()
 
     if not api_key:
         st.info("Set GEMINI_API_KEY in .env or enter a Gemini API key in the sidebar to continue.")
@@ -55,6 +60,7 @@ def main() -> None:
     file_search = FileSearchManager(client, secrets=[api_key])
     upload_manager = UploadManager(client, secrets=[api_key])
     qa_engine = QAEngine(client, secrets=[api_key])
+    source_registry = SourceRegistry()
 
     stores = load_stores(file_search)
     selected_store_name = render_store_selector(stores)
@@ -65,11 +71,11 @@ def main() -> None:
     with stores_tab:
         render_stores_tab(file_search, stores)
     with upload_tab:
-        render_upload_tab(upload_manager, selected_store_name)
+        render_upload_tab(upload_manager, source_registry, selected_store_name)
     with ask_tab:
-        render_ask_tab(qa_engine, file_search, model, selected_store_name)
+        render_ask_tab(qa_engine, file_search, source_registry, model, selected_store_name, is_admin)
     with documents_tab:
-        render_documents_tab(file_search, selected_store_name)
+        render_documents_tab(file_search, source_registry, selected_store_name, is_admin)
 
 
 def render_api_key_controls(env_api_key: str | None) -> str | None:
@@ -95,12 +101,35 @@ def render_model_controls() -> str:
     return selected
 
 
+def render_admin_controls() -> bool:
+    st.sidebar.header("Admin")
+    if "is_admin" not in st.session_state:
+        st.session_state.is_admin = False
+
+    if st.session_state.is_admin:
+        st.sidebar.success("Admin access enabled")
+        if st.sidebar.button("Log out admin"):
+            st.session_state.is_admin = False
+        return bool(st.session_state.is_admin)
+
+    password = st.sidebar.text_input("Admin password", type="password")
+    if admin_password_from_env() == DEFAULT_ADMIN_PASSWORD:
+        st.sidebar.caption("Default test password is active. Set ADMIN_PASSWORD in .env before real use.")
+    if st.sidebar.button("Log in as admin"):
+        if verify_admin_password(password):
+            st.session_state.is_admin = True
+            st.sidebar.success("Admin access enabled")
+        else:
+            st.sidebar.error("Incorrect admin password")
+    return bool(st.session_state.is_admin)
+
+
 def load_stores(file_search: FileSearchManager) -> list[Any]:
     if "stores" not in st.session_state:
         st.session_state.stores = []
 
     col_a, col_b = st.sidebar.columns([1, 1])
-    refresh = col_a.button("Refresh stores", use_container_width=True)
+    refresh = col_a.button("Refresh stores", width="stretch")
     if refresh or not st.session_state.stores:
         try:
             st.session_state.stores = file_search.list_stores(page_size=20)
@@ -141,7 +170,7 @@ def render_stores_tab(file_search: FileSearchManager, stores: list[Any]) -> None
 
     st.divider()
     if stores:
-        st.dataframe([object_to_dict(store) for store in stores], use_container_width=True)
+        st.dataframe([object_to_dict(store) for store in stores], width="stretch")
     else:
         st.info("Create a store or refresh after creating one in Google AI Studio.")
 
@@ -162,7 +191,11 @@ def render_stores_tab(file_search: FileSearchManager, stores: list[Any]) -> None
                 st.error(str(exc))
 
 
-def render_upload_tab(upload_manager: UploadManager, selected_store_name: str | None) -> None:
+def render_upload_tab(
+    upload_manager: UploadManager,
+    source_registry: SourceRegistry,
+    selected_store_name: str | None,
+) -> None:
     st.subheader("Upload documents or images")
     if not selected_store_name:
         st.info("Select or create a File Search store first.")
@@ -193,27 +226,40 @@ def render_upload_tab(upload_manager: UploadManager, selected_store_name: str | 
                 st.warning(f"{uploaded_file.name}: {warning}")
 
             with st.spinner(f"Uploading {uploaded_file.name}"):
+                source_record = None
                 try:
+                    source_record = source_registry.save_source(
+                        filename=uploaded_file.name,
+                        data=data,
+                        mime_type=validation.mime_type or "application/octet-stream",
+                        file_search_store_name=selected_store_name,
+                    )
                     result = upload_manager.upload_file_bytes(
                         file_search_store_name=selected_store_name,
                         filename=uploaded_file.name,
                         data=data,
                         content_type=validation.mime_type,
                         display_name=safe_display_name(uploaded_file.name),
+                        custom_metadata=source_record.to_file_search_metadata(),
                         wait=wait_for_import,
                         poll_interval=float(poll_interval),
                     )
                     st.success(f"Uploaded {uploaded_file.name} as {result.mime_type}")
+                    st.caption(f"Local source archive id: {source_record.source_id}")
                     st.json(to_plain_data(result.final_operation or result.operation))
                 except (ValueError, GeminiAPIError) as exc:
+                    if source_record:
+                        source_registry.delete_source(source_record.source_id)
                     st.error(f"{uploaded_file.name}: {exc}")
 
 
 def render_ask_tab(
     qa_engine: QAEngine,
     file_search: FileSearchManager,
+    source_registry: SourceRegistry,
     model: str,
     selected_store_name: str | None,
+    is_admin: bool,
 ) -> None:
     st.subheader("Ask the selected store")
     if not selected_store_name:
@@ -241,26 +287,45 @@ def render_ask_tab(
                 return
 
         st.markdown("### Answer")
-        st.markdown(result.text or "_No text returned._")
-        render_citations(file_search, result.grounding.citations)
+        if result.text:
+            rendered = render_answer_with_hover(result.text, result.grounding)
+            components.html(
+                rendered.html,
+                height=estimate_answer_height(result.text, rendered.span_count),
+                scrolling=True,
+            )
+        else:
+            st.markdown("_No text returned._")
+        render_citations(file_search, source_registry, result.grounding.citations, is_admin)
         with st.expander("Raw grounding metadata"):
             st.json(result.grounding.raw_grounding_metadata or {})
         with st.expander("Raw response"):
             st.json(to_plain_data(result.raw_response))
 
 
-def render_citations(file_search: FileSearchManager, citations: list[Citation]) -> None:
+def render_citations(
+    file_search: FileSearchManager,
+    source_registry: SourceRegistry,
+    citations: list[Citation],
+    is_admin: bool,
+) -> None:
     st.markdown("### Citations and grounding")
     if not citations:
         st.info("No grounding metadata citations were returned.")
         return
 
-    st.dataframe([citation.to_dict() for citation in citations], use_container_width=True)
+    st.dataframe([citation.to_dict() for citation in citations], width="stretch")
     for index, citation in enumerate(citations, start=1):
         with st.expander(f"Citation {index}: {citation.title or citation.uri or citation.media_id or 'retrieved context'}"):
             st.json(citation.to_dict())
             if citation.text:
                 st.write(citation.text)
+            render_citation_source_controls(
+                source_registry=source_registry,
+                citation=citation,
+                is_admin=is_admin,
+                key_prefix=f"citation-{index}",
+            )
             if citation.media_id and st.button("Fetch cited media", key=f"media-{index}"):
                 try:
                     media = file_search.download_media(citation.media_id)
@@ -274,7 +339,12 @@ def render_citations(file_search: FileSearchManager, citations: list[Citation]) 
                     st.error(str(exc))
 
 
-def render_documents_tab(file_search: FileSearchManager, selected_store_name: str | None) -> None:
+def render_documents_tab(
+    file_search: FileSearchManager,
+    source_registry: SourceRegistry,
+    selected_store_name: str | None,
+    is_admin: bool,
+) -> None:
     st.subheader("Documents in selected store")
     if not selected_store_name:
         st.info("Select or create a File Search store first.")
@@ -288,7 +358,7 @@ def render_documents_tab(file_search: FileSearchManager, selected_store_name: st
 
     documents = st.session_state.get("documents", [])
     if documents:
-        st.dataframe([object_to_dict(document) for document in documents], use_container_width=True)
+        st.dataframe([object_to_dict(document) for document in documents], width="stretch")
         with st.expander("Delete a document"):
             names = [object_name(document) for document in documents if object_name(document)]
             target = st.selectbox("Document to delete", names)
@@ -303,6 +373,123 @@ def render_documents_tab(file_search: FileSearchManager, selected_store_name: st
     else:
         st.caption("No documents loaded yet.")
 
+    render_source_archive(source_registry, selected_store_name, is_admin)
+
+
+def render_citation_source_controls(
+    source_registry: SourceRegistry,
+    citation: Citation,
+    is_admin: bool,
+    key_prefix: str,
+) -> None:
+    source_id = source_id_from_custom_metadata(citation.custom_metadata)
+    if not source_id:
+        st.caption("No local source archive id was returned for this citation.")
+        return
+    if not is_admin:
+        st.caption("Admin login required to view the original source file.")
+        return
+
+    record = source_registry.get(source_id)
+    if record is None:
+        st.warning("This citation references a local source id, but the archived file was not found.")
+        return
+    render_source_record_viewer(
+        source_registry=source_registry,
+        record=record,
+        key_prefix=key_prefix,
+        page_number=citation.page_number,
+    )
+
+
+def render_source_archive(
+    source_registry: SourceRegistry,
+    selected_store_name: str,
+    is_admin: bool,
+) -> None:
+    st.divider()
+    st.subheader("Local source archive")
+    if not is_admin:
+        st.info("Admin login is required to view or download locally archived source files.")
+        return
+
+    records = source_registry.list_records(selected_store_name)
+    if not records:
+        st.caption("No local originals have been archived for this store from this app.")
+        return
+
+    st.dataframe(
+        [
+            {
+                "source_id": record.source_id,
+                "filename": record.original_filename,
+                "mime_type": record.mime_type,
+                "size_bytes": record.size_bytes,
+                "sha256": record.sha256,
+                "created_at": record.created_at,
+            }
+            for record in records
+        ],
+        width="stretch",
+    )
+    selected_id = st.selectbox(
+        "Source file to view",
+        [record.source_id for record in records],
+        format_func=lambda source_id: _source_label(source_id, records),
+    )
+    record = source_registry.get(selected_id)
+    if record:
+        render_source_record_viewer(source_registry, record, key_prefix=f"archive-{record.source_id}")
+
+
+def render_source_record_viewer(
+    source_registry: SourceRegistry,
+    record: SourceRecord,
+    key_prefix: str,
+    page_number: int | None = None,
+) -> None:
+    st.caption(f"Original source: {record.original_filename}")
+    try:
+        data = source_registry.file_bytes(record)
+    except OSError as exc:
+        st.error(f"Could not read archived source file: {exc}")
+        return
+
+    st.download_button(
+        "Download original source",
+        data=data,
+        file_name=record.original_filename,
+        mime=record.mime_type,
+        key=f"{key_prefix}-download",
+    )
+    if record.mime_type == "application/pdf":
+        show_pdf = st.checkbox("Show PDF preview", value=False, key=f"{key_prefix}-pdf-preview")
+        if show_pdf:
+            render_pdf_preview(data, page_number)
+    elif record.mime_type in {"image/png", "image/jpeg"}:
+        st.image(data, caption=record.original_filename)
+    elif record.mime_type.startswith("text/") or record.mime_type in {"application/json", "application/xml"}:
+        preview = data[:20_000].decode("utf-8", errors="replace")
+        st.text_area("Source preview", value=preview, height=240, key=f"{key_prefix}-text-preview")
+
+
+def render_pdf_preview(data: bytes, page_number: int | None = None) -> None:
+    page_fragment = f"#page={page_number}" if page_number else ""
+    encoded = base64.b64encode(data).decode("ascii")
+    components.html(
+        f"""
+        <iframe
+            src="data:application/pdf;base64,{encoded}{page_fragment}"
+            width="100%"
+            height="720"
+            style="border: 1px solid #d0d7de; border-radius: 6px;"
+            title="PDF source preview">
+        </iframe>
+        """,
+        height=740,
+        scrolling=False,
+    )
+
 
 def _store_label(name: str, stores: list[Any]) -> str:
     for store in stores:
@@ -310,6 +497,13 @@ def _store_label(name: str, stores: list[Any]) -> str:
             display_name = object_display_name(store)
             return f"{display_name} ({name})" if display_name else name
     return name
+
+
+def _source_label(source_id: str, records: list[SourceRecord]) -> str:
+    for record in records:
+        if record.source_id == source_id:
+            return f"{record.original_filename} ({source_id[:8]})"
+    return source_id
 
 
 if __name__ == "__main__":

@@ -22,7 +22,17 @@ class Citation:
 class GroundingResult:
     citations: list[Citation]
     grounding_supports: list[Any]
+    support_spans: list["GroundingSupportSpan"]
     raw_grounding_metadata: dict[str, Any] | None
+
+
+@dataclass(frozen=True)
+class GroundingSupportSpan:
+    start_index: int
+    end_index: int
+    text: str | None
+    citation_indices: list[int]
+    confidence_scores: list[float] | None = None
 
 
 def parse_grounding_metadata(response_or_metadata: Any) -> GroundingResult:
@@ -32,7 +42,8 @@ def parse_grounding_metadata(response_or_metadata: Any) -> GroundingResult:
     supports = _get(metadata, "grounding_supports", "groundingSupports") or []
 
     citations: list[Citation] = []
-    for chunk in chunks:
+    chunk_to_citation_index: dict[int, int] = {}
+    for chunk_index, chunk in enumerate(chunks):
         retrieved_context = _get(chunk, "retrieved_context", "retrievedContext")
         if not retrieved_context:
             continue
@@ -50,10 +61,12 @@ def parse_grounding_metadata(response_or_metadata: Any) -> GroundingResult:
                 ),
             )
         )
+        chunk_to_citation_index[chunk_index] = len(citations) - 1
 
     return GroundingResult(
         citations=citations,
         grounding_supports=to_plain_data(supports) or [],
+        support_spans=_parse_support_spans(supports, chunk_to_citation_index),
         raw_grounding_metadata=raw,
     )
 
@@ -99,6 +112,42 @@ def _normalize_custom_metadata(metadata: Any) -> list[dict[str, Any]] | None:
         if isinstance(data, dict):
             normalized.append({key: value for key, value in data.items() if value is not None})
     return normalized or None
+
+
+def _parse_support_spans(
+    supports: Any,
+    chunk_to_citation_index: dict[int, int],
+) -> list[GroundingSupportSpan]:
+    spans: list[GroundingSupportSpan] = []
+    for support in supports or []:
+        segment = _get(support, "segment")
+        start_index = _get(segment, "start_index", "startIndex")
+        end_index = _get(segment, "end_index", "endIndex")
+        if start_index is None or end_index is None:
+            continue
+
+        raw_indices = _get(support, "grounding_chunk_indices", "groundingChunkIndices") or []
+        if not raw_indices:
+            raw_index = _get(support, "grounding_chunk_index", "groundingChunkIndex")
+            raw_indices = [raw_index] if raw_index is not None else []
+
+        citation_indices = []
+        for index in raw_indices:
+            if index in chunk_to_citation_index:
+                citation_indices.append(chunk_to_citation_index[index])
+
+        spans.append(
+            GroundingSupportSpan(
+                start_index=int(start_index),
+                end_index=int(end_index),
+                text=_get(segment, "text"),
+                citation_indices=citation_indices,
+                confidence_scores=to_plain_data(
+                    _get(support, "confidence_scores", "confidenceScores")
+                ),
+            )
+        )
+    return spans
 
 
 def _get(value: Any, *names: str) -> Any:

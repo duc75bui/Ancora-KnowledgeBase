@@ -27,6 +27,7 @@ def test_upload_file_bytes_calls_google_upload_to_store(tmp_path):
         filename="notes.txt",
         data=b"hello",
         content_type="text/plain",
+        custom_metadata=[{"key": "source_id", "string_value": "source-1"}],
         wait=True,
     )
 
@@ -35,4 +36,5 @@ def test_upload_file_bytes_calls_google_upload_to_store(tmp_path):
     assert uploaded_path.endswith("notes.txt")
     assert config["display_name"] == "notes.txt"
     assert config["mime_type"] == "text/plain"
+    assert config["custom_metadata"] == [{"key": "source_id", "string_value": "source-1"}]
     assert result.final_operation.done is True

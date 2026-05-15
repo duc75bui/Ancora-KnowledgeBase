@@ -20,7 +20,13 @@ def test_parse_grounding_metadata_from_dict():
                             }
                         }
                     ],
-                    "groundingSupports": [{"segment": {"startIndex": 0}}],
+                    "groundingSupports": [
+                        {
+                            "segment": {"startIndex": 0, "endIndex": 11, "text": "Policy text"},
+                            "groundingChunkIndices": [0],
+                            "confidenceScores": [0.9],
+                        }
+                    ],
                 }
             }
         ]
@@ -35,6 +41,9 @@ def test_parse_grounding_metadata_from_dict():
     assert citation.media_id == "fileSearchStores/store-1/media/blob-1"
     assert citation.custom_metadata == [{"key": "dept", "stringValue": "ops"}]
     assert result.grounding_supports
+    assert result.support_spans[0].start_index == 0
+    assert result.support_spans[0].end_index == 11
+    assert result.support_spans[0].citation_indices == [0]
 
 
 def test_parse_grounding_metadata_from_sdk_like_objects():

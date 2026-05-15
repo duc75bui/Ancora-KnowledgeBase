@@ -32,9 +32,12 @@ Edit `.env` and set:
 
 ```text
 GEMINI_API_KEY=your-gemini-api-key
+ADMIN_PASSWORD=admin123
 ```
 
 You can also leave `.env` unset and enter the key in the Streamlit sidebar. The app never hardcodes or prints the full API key.
+
+`ADMIN_PASSWORD` controls access to locally archived original files. The default `admin123` is only for local testing.
 
 ## Run
 
@@ -61,11 +64,29 @@ Fix it by creating or selecting a Gemini API key in Google AI Studio, or by edit
 - Lists, creates, selects, and deletes Google Gemini File Search stores.
 - Creates stores with `models/gemini-embedding-2` so text and PNG/JPEG images can be used for multimodal File Search.
 - Uploads files directly into the selected File Search store with `upload_to_file_search_store`.
+- Archives a local copy of newly uploaded original files under `.source_files/` for admin-only viewing.
+- Attaches `source_id`, `source_filename`, and `source_sha256` as File Search custom metadata during upload.
 - Shows long-running upload/import operation output.
 - Lists and deletes File Search documents in a selected store.
 - Asks questions with only the File Search tool attached to `generate_content`.
 - Displays answers, citations, page numbers, media IDs, custom metadata, grounding supports, and raw grounding metadata when returned.
+- Highlights answer spans when Google returns `groundingSupports`; hover or focus the highlighted text to inspect the retrieved snippet, source title, and page number.
 - Can fetch cited media bytes by `media_id` when the API returns media citations.
+- Lets logged-in admins download or preview locally archived source PDFs/images/text files from citation details and the Documents tab.
+
+## Admin Source File Viewing
+
+Google File Search stores are still the retrieval source of truth. The local `.source_files/` archive exists only so an admin can view or download the original uploaded file later. It is not used for chunking, embedding, indexing, retrieval, or answering.
+
+Only files uploaded through this app after this feature was added have local `source_id` metadata. Existing File Search documents may still cite text and page numbers, but the app cannot link them to a local original unless they were archived locally during upload.
+
+For local testing, the default admin password is:
+
+```text
+admin123
+```
+
+Set `ADMIN_PASSWORD` in `.env` before using real documents. This Streamlit password gate is not production authentication. For deployment, replace it with OAuth, reverse proxy auth, or another real identity layer.
 
 ## Supported Models
 
@@ -104,6 +125,9 @@ According to the official guide, raw `File` objects uploaded through the File AP
 - The local MIME allowlist covers common official types rather than every MIME type listed in the guide.
 - Metadata filters are exposed as an advanced text box, but the app does not yet provide a visual metadata builder.
 - The model detail page for `gemini-2.5-flash` says File Search is supported, but the File Search guide's supported model table does not include it, so this app keeps the initial dropdown aligned to the File Search guide table.
+- Original-file viewing is only available for local files uploaded through this app after source archiving was added.
+- PDF previews are embedded as browser data URLs; large PDFs may be better downloaded than previewed inline.
+- Citation hover depends on Google returning `groundingSupports` span metadata. If no span metadata is returned, the app still shows the citation list and raw grounding metadata.
 
 ## Tests
 

@@ -9,4 +9,5 @@ __pycache__/
 .streamlit/secrets.toml
 .tmp_uploads/
 tmp_uploads/
+.source_files/
 *.log
