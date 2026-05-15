@@ -63,14 +63,15 @@ Fix it by creating or selecting a Gemini API key in Google AI Studio, or by edit
 
 - Loads `GEMINI_API_KEY` from `.env` or accepts a key in the UI.
 - Lets the user choose a File Search-supported Gemini model.
-- Lists, creates, selects, and deletes Google Gemini File Search stores.
+- Normal users only see the Ask workflow.
+- Admin users can list, create, select, and delete Google Gemini File Search stores.
 - Creates stores with `models/gemini-embedding-2` so text and PNG/JPEG images can be used for multimodal File Search.
-- Uploads files directly into the selected File Search store with `upload_to_file_search_store`.
+- Admin users can upload files directly into the selected File Search store with `upload_to_file_search_store`.
 - Lets the SDK/API infer upload MIME type from the file path, matching Google's direct-upload example. The app still validates MIME locally for user feedback and source archive metadata.
 - Archives a local copy of newly uploaded original files under `.source_files/` for admin-only viewing.
 - Attaches `source_id`, `source_filename`, and `source_sha256` as File Search custom metadata during upload.
-- Shows long-running upload/import operation output.
-- Lists and deletes File Search documents in a selected store.
+- Admin users can view long-running upload/import operation output.
+- Admin users can list and delete File Search documents in a selected store.
 - Asks questions with only the File Search tool attached to `generate_content`.
 - Lets the user attach optional query-context images in the Ask tab using Gemini inline image input. Supported image input formats are PNG, JPEG, WebP, HEIC, and HEIF.
 - Displays answers, citations, page numbers, media IDs, custom metadata, grounding supports, and raw grounding metadata when returned.

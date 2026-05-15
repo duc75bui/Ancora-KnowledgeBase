@@ -64,19 +64,25 @@ def main() -> None:
     source_registry = SourceRegistry()
 
     stores = load_stores(file_search)
-    selected_store_name = render_store_selector(stores)
+    selected_store_name = render_store_selector(stores, is_admin=is_admin)
 
-    stores_tab, upload_tab, ask_tab, documents_tab = st.tabs(
-        ["Stores", "Upload", "Ask", "Documents"]
+    render_ask_tab(
+        qa_engine,
+        file_search,
+        source_registry,
+        model,
+        selected_store_name,
+        is_admin,
     )
-    with stores_tab:
-        render_stores_tab(file_search, stores)
-    with upload_tab:
-        render_upload_tab(upload_manager, source_registry, selected_store_name)
-    with ask_tab:
-        render_ask_tab(qa_engine, file_search, source_registry, model, selected_store_name, is_admin)
-    with documents_tab:
-        render_documents_tab(file_search, source_registry, selected_store_name, is_admin)
+
+    if is_admin:
+        render_admin_panel(
+            file_search=file_search,
+            upload_manager=upload_manager,
+            source_registry=source_registry,
+            stores=stores,
+            selected_store_name=selected_store_name,
+        )
 
 
 def render_api_key_controls(env_api_key: str | None) -> str | None:
@@ -129,30 +135,59 @@ def load_stores(file_search: FileSearchManager) -> list[Any]:
     if "stores" not in st.session_state:
         st.session_state.stores = []
 
-    col_a, col_b = st.sidebar.columns([1, 1])
-    refresh = col_a.button("Refresh stores", width="stretch")
+    refresh = st.session_state.is_admin and st.sidebar.button("Refresh stores", width="stretch")
     if refresh or not st.session_state.stores:
         try:
             st.session_state.stores = file_search.list_stores(page_size=20)
         except GeminiAPIError as exc:
             st.sidebar.error(str(exc))
-    col_b.write("")
     return st.session_state.stores
 
 
-def render_store_selector(stores: list[Any]) -> str | None:
-    st.sidebar.header("Store")
+def render_store_selector(stores: list[Any], is_admin: bool) -> str | None:
+    if is_admin:
+        st.sidebar.header("Store")
     if not stores:
-        st.sidebar.warning("No File Search stores loaded.")
+        if is_admin:
+            st.sidebar.warning("No File Search stores loaded.")
+        else:
+            st.info("No knowledge base store is available yet. Ask an admin to create or select a File Search store.")
         return None
 
     names = [object_name(store) for store in stores if object_name(store)]
+    if not is_admin:
+        selected = st.session_state.get("selected_store_name")
+        if selected in names:
+            return selected
+        return names[0] if names else None
+
     selected = st.sidebar.selectbox(
         "Selected File Search store",
         options=names,
+        key="selected_store_name",
         format_func=lambda name: _store_label(name, stores),
     )
     return selected
+
+
+def render_admin_panel(
+    file_search: FileSearchManager,
+    upload_manager: UploadManager,
+    source_registry: SourceRegistry,
+    stores: list[Any],
+    selected_store_name: str | None,
+) -> None:
+    st.divider()
+    st.subheader("Admin")
+    stores_tab, upload_tab, documents_tab = st.tabs(
+        ["Stores", "Upload", "Documents"]
+    )
+    with stores_tab:
+        render_stores_tab(file_search, stores)
+    with upload_tab:
+        render_upload_tab(upload_manager, source_registry, selected_store_name)
+    with documents_tab:
+        render_documents_tab(file_search, source_registry, selected_store_name, is_admin=True)
 
 
 def render_stores_tab(file_search: FileSearchManager, stores: list[Any]) -> None:
@@ -262,7 +297,7 @@ def render_ask_tab(
     selected_store_name: str | None,
     is_admin: bool,
 ) -> None:
-    st.subheader("Ask the selected store")
+    st.subheader("Ask")
     if not selected_store_name:
         st.info("Select or create a File Search store first.")
         return
