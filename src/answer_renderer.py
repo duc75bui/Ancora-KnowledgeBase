@@ -12,7 +12,12 @@ class RenderedAnswer:
     span_count: int
 
 
-def render_answer_with_hover(answer_text: str, grounding: GroundingResult) -> RenderedAnswer:
+def render_answer_with_hover(
+    answer_text: str,
+    grounding: GroundingResult,
+    media_data_urls: dict[str, str] | None = None,
+) -> RenderedAnswer:
+    media_data_urls = media_data_urls or {}
     spans = sorted(
         grounding.support_spans,
         key=lambda item: (item.start_index, item.end_index),
@@ -34,7 +39,7 @@ def render_answer_with_hover(answer_text: str, grounding: GroundingResult) -> Re
     for span in valid_spans:
         parts.append(_format_text(answer_text[cursor : span.start_index]))
         span_text = answer_text[span.start_index : span.end_index]
-        tooltip = _tooltip_html(span.citation_indices, grounding.citations)
+        tooltip = _tooltip_html(span.citation_indices, grounding.citations, media_data_urls)
         label = _citation_label(span.citation_indices)
         parts.append(
             '<span class="citation-span" tabindex="0">'
@@ -62,7 +67,11 @@ def _citation_label(indices: list[int]) -> str:
     return ",".join(str(index + 1) for index in indices[:3])
 
 
-def _tooltip_html(indices: list[int], citations: list[Citation]) -> str:
+def _tooltip_html(
+    indices: list[int],
+    citations: list[Citation],
+    media_data_urls: dict[str, str],
+) -> str:
     if not indices:
         return '<span class="tooltip-title">Grounding metadata</span><span>No citation index was returned.</span>'
 
@@ -78,10 +87,18 @@ def _tooltip_html(indices: list[int], citations: list[Citation]) -> str:
         if citation.file_search_store:
             meta_bits.append(citation.file_search_store)
         snippet = _compact(citation.text or "")
+        media_preview = ""
+        if citation.media_id and citation.media_id in media_data_urls:
+            media_preview = (
+                '<img class="tooltip-media" '
+                f'src="{html.escape(media_data_urls[citation.media_id], quote=True)}" '
+                f'alt="{html.escape(title, quote=True)}">'
+            )
         sections.append(
             '<span class="tooltip-section">'
             f'<span class="tooltip-title">{html.escape(title)}</span>'
             f'<span class="tooltip-meta">{html.escape(" | ".join(meta_bits))}</span>'
+            f"{media_preview}"
             f'<span class="tooltip-snippet">{html.escape(snippet)}</span>'
             "</span>"
         )
@@ -167,6 +184,14 @@ def _style_block() -> str:
   display: block;
   font-size: 13px;
   line-height: 1.45;
+}
+.tooltip-media {
+  border-radius: 6px;
+  display: block;
+  margin: 8px 0;
+  max-height: 240px;
+  max-width: 100%;
+  object-fit: contain;
 }
 .citation-note {
   color: #64748b;

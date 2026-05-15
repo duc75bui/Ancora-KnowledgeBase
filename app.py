@@ -270,6 +270,11 @@ def render_ask_tab(
         question = st.text_area("Question", height=120)
         metadata_filter = st.text_input("Optional metadata filter", placeholder='author="Robert Graves"')
         top_k = st.number_input("Optional top_k", min_value=0, max_value=50, value=0)
+        include_media_previews = st.checkbox(
+            "Show image citation previews in hover cards",
+            value=True,
+            help="When File Search returns media IDs, the app fetches cited media and embeds image thumbnails in hover cards.",
+        )
         submitted = st.form_submit_button("Ask")
 
     if submitted:
@@ -287,8 +292,15 @@ def render_ask_tab(
                 return
 
         st.markdown("### Answer")
+        media_data_urls = {}
+        if include_media_previews:
+            media_data_urls = citation_media_data_urls(file_search, result.grounding.citations)
         if result.text:
-            rendered = render_answer_with_hover(result.text, result.grounding)
+            rendered = render_answer_with_hover(
+                result.text,
+                result.grounding,
+                media_data_urls=media_data_urls,
+            )
             components.html(
                 rendered.html,
                 height=estimate_answer_height(result.text, rendered.span_count),
@@ -489,6 +501,35 @@ def render_pdf_preview(data: bytes, page_number: int | None = None) -> None:
         height=740,
         scrolling=False,
     )
+
+
+def citation_media_data_urls(
+    file_search: FileSearchManager,
+    citations: list[Citation],
+) -> dict[str, str]:
+    media_data_urls: dict[str, str] = {}
+    for citation in citations:
+        if not citation.media_id or citation.media_id in media_data_urls:
+            continue
+        try:
+            media = file_search.download_media(citation.media_id)
+        except GeminiAPIError as exc:
+            st.warning(f"Could not fetch cited media preview: {exc}")
+            continue
+        mime_type = infer_image_mime_type(media)
+        if not mime_type:
+            continue
+        encoded = base64.b64encode(media).decode("ascii")
+        media_data_urls[citation.media_id] = f"data:{mime_type};base64,{encoded}"
+    return media_data_urls
+
+
+def infer_image_mime_type(data: bytes) -> str | None:
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    return None
 
 
 def _store_label(name: str, stores: list[Any]) -> str:

@@ -70,8 +70,9 @@ Fix it by creating or selecting a Gemini API key in Google AI Studio, or by edit
 - Lists and deletes File Search documents in a selected store.
 - Asks questions with only the File Search tool attached to `generate_content`.
 - Displays answers, citations, page numbers, media IDs, custom metadata, grounding supports, and raw grounding metadata when returned.
-- Highlights answer spans when Google returns `groundingSupports`; hover or focus the highlighted text to inspect the retrieved snippet, source title, and page number.
+- Highlights answer spans when Google returns `groundingSupports`; hover or focus the highlighted text to inspect the retrieved snippet, source title, page number, and optional image preview.
 - Can fetch cited media bytes by `media_id` when the API returns media citations.
+- Can automatically fetch PNG/JPEG media returned by File Search `media_id` and embed those images in citation hover cards.
 - Lets logged-in admins download or preview locally archived source PDFs/images/text files from citation details and the Documents tab.
 
 ## Admin Source File Viewing
@@ -128,6 +129,7 @@ According to the official guide, raw `File` objects uploaded through the File AP
 - Original-file viewing is only available for local files uploaded through this app after source archiving was added.
 - PDF previews are embedded as browser data URLs; large PDFs may be better downloaded than previewed inline.
 - Citation hover depends on Google returning `groundingSupports` span metadata. If no span metadata is returned, the app still shows the citation list and raw grounding metadata.
+- Image hover previews depend on Google returning `media_id` values in grounding metadata. The app only embeds returned PNG/JPEG media in hover cards.
 
 ## Tests
 

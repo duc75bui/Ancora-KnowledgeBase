@@ -46,3 +46,34 @@ def test_render_answer_shows_note_when_no_spans():
 
     assert rendered.span_count == 0
     assert "No answer-span grounding supports were returned." in rendered.html
+
+
+def test_render_answer_can_embed_image_media_preview_in_hover():
+    grounding = GroundingResult(
+        citations=[
+            Citation(
+                title="diagram.png",
+                text="The diagram shows the approval flow.",
+                media_id="media-1",
+            )
+        ],
+        grounding_supports=[],
+        support_spans=[
+            GroundingSupportSpan(
+                start_index=0,
+                end_index=11,
+                text="The diagram",
+                citation_indices=[0],
+            )
+        ],
+        raw_grounding_metadata=None,
+    )
+
+    rendered = render_answer_with_hover(
+        "The diagram explains the process.",
+        grounding,
+        media_data_urls={"media-1": "data:image/png;base64,abc123"},
+    )
+
+    assert "tooltip-media" in rendered.html
+    assert "data:image/png;base64,abc123" in rendered.html
