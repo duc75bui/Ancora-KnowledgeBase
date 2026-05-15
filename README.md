@@ -64,6 +64,7 @@ Fix it by creating or selecting a Gemini API key in Google AI Studio, or by edit
 - Lists, creates, selects, and deletes Google Gemini File Search stores.
 - Creates stores with `models/gemini-embedding-2` so text and PNG/JPEG images can be used for multimodal File Search.
 - Uploads files directly into the selected File Search store with `upload_to_file_search_store`.
+- Lets the SDK/API infer upload MIME type from the file path, matching Google's direct-upload example. The app still validates MIME locally for user feedback and source archive metadata.
 - Archives a local copy of newly uploaded original files under `.source_files/` for admin-only viewing.
 - Attaches `source_id`, `source_filename`, and `source_sha256` as File Search custom metadata during upload.
 - Shows long-running upload/import operation output.

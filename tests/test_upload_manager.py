@@ -35,6 +35,6 @@ def test_upload_file_bytes_calls_google_upload_to_store(tmp_path):
     assert store_name == "fileSearchStores/store-1"
     assert uploaded_path.endswith("notes.txt")
     assert config["display_name"] == "notes.txt"
-    assert config["mime_type"] == "text/plain"
+    assert "mime_type" not in config
     assert config["custom_metadata"] == [{"key": "source_id", "string_value": "source-1"}]
     assert result.final_operation.done is True

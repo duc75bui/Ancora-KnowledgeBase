@@ -1,7 +1,14 @@
 import pytest
 
 from src.config import SUPPORTED_FILE_SEARCH_MODELS
-from src.validation import MAX_FILE_SIZE_BYTES, image_dimensions, validate_file, validate_model
+from src.validation import (
+    MAX_FILE_SIZE_BYTES,
+    image_dimensions,
+    infer_mime_type,
+    normalize_mime_type,
+    validate_file,
+    validate_model,
+)
 
 
 def test_supported_model_validation_accepts_documented_models():
@@ -19,6 +26,21 @@ def test_validate_file_accepts_pdf():
 
     assert result.is_valid
     assert result.mime_type == "application/pdf"
+
+
+def test_infer_mime_type_prefers_extension_for_docx_over_bad_browser_type():
+    mime_type = infer_mime_type(
+        "AD-TF-03 - ThereFore Connector System Scope and Context-110425-164353.docx",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document, application/octet-stream",
+    )
+
+    assert mime_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+
+def test_normalize_mime_type_rejects_invalid_type_subtype_values():
+    assert normalize_mime_type("text/plain; charset=utf-8") == "text/plain"
+    assert normalize_mime_type("not a mime type") is None
+    assert normalize_mime_type("application/pdf, application/octet-stream") is None
 
 
 def test_validate_file_rejects_too_large_file():

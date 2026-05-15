@@ -99,7 +99,6 @@ class UploadManager:
 
         config: dict[str, Any] = {
             "display_name": display_name or safe_display_name(path.name),
-            "mime_type": validation.mime_type,
         }
         if custom_metadata:
             config["custom_metadata"] = custom_metadata

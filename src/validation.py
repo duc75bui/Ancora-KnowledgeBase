@@ -103,6 +103,8 @@ SUPPORTED_MIME_TYPES: set[str] = {
     "text/yaml",
 }
 
+MIME_TYPE_PATTERN = re.compile(r"^[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+$")
+
 
 @dataclass(frozen=True)
 class FileValidationResult:
@@ -130,15 +132,25 @@ def accepted_extensions() -> list[str]:
 
 
 def infer_mime_type(filename: str, content_type: str | None = None) -> str | None:
-    if content_type and content_type != "application/octet-stream":
-        return content_type.split(";")[0].strip().lower()
-
     suffix = Path(filename).suffix.lower()
     if suffix in EXTENSION_MIME_OVERRIDES:
         return EXTENSION_MIME_OVERRIDES[suffix]
 
+    normalized_content_type = normalize_mime_type(content_type)
+    if normalized_content_type and normalized_content_type != "application/octet-stream":
+        return normalized_content_type
+
     guessed, _ = mimetypes.guess_type(filename)
-    return guessed.lower() if guessed else None
+    return normalize_mime_type(guessed)
+
+
+def normalize_mime_type(content_type: str | None) -> str | None:
+    if not content_type:
+        return None
+    candidate = content_type.split(";")[0].strip().lower()
+    if not MIME_TYPE_PATTERN.match(candidate):
+        return None
+    return candidate
 
 
 def validate_file(
