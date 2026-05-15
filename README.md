@@ -51,6 +51,8 @@ If `streamlit` is not on PATH, use:
 py -m streamlit run app.py
 ```
 
+For server or internal-network deployment, see [DEPLOYMENT.md](DEPLOYMENT.md).
+
 ## Troubleshooting API Key Restrictions
 
 If the app shows `403 PERMISSION_DENIED` with `API_KEY_SERVICE_BLOCKED` for a method such as `RetrieverService.ListFileSearchStores`, the key is valid enough to identify a Google Cloud project, but its API restrictions block Gemini File Search on `generativelanguage.googleapis.com`.
