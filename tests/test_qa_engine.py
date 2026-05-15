@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from src.file_search_manager import GeminiAPIError
-from src.qa_engine import QAEngine
+from src.qa_engine import QAEngine, QueryImage
 
 
 class FakeModels:
@@ -52,6 +52,30 @@ def test_query_uses_only_file_search_tool_for_selected_store():
     assert config.tools[0].url_context is None
     assert result.text == "Grounded answer"
     assert result.grounding.citations[0].title == "doc.txt"
+
+
+def test_query_can_include_inline_image_context():
+    client = FakeClient()
+    engine = QAEngine(client)
+
+    engine.answer(
+        question="What store policy applies to this screenshot?",
+        model="gemini-3-flash-preview",
+        file_search_store_name="fileSearchStores/store-1",
+        query_images=[
+            QueryImage(
+                filename="screen.png",
+                data=b"\x89PNG\r\n\x1a\nimage",
+                mime_type="image/png",
+            )
+        ],
+    )
+
+    _, contents, _ = client.models.call
+    assert isinstance(contents, list)
+    assert contents[0].inline_data.mime_type == "image/png"
+    assert contents[0].inline_data.data == b"\x89PNG\r\n\x1a\nimage"
+    assert contents[1] == "What store policy applies to this screenshot?"
 
 
 def test_query_api_errors_are_sanitized():

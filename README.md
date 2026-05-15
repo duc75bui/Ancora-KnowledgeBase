@@ -70,6 +70,7 @@ Fix it by creating or selecting a Gemini API key in Google AI Studio, or by edit
 - Shows long-running upload/import operation output.
 - Lists and deletes File Search documents in a selected store.
 - Asks questions with only the File Search tool attached to `generate_content`.
+- Lets the user attach optional query-context images in the Ask tab using Gemini inline image input. Supported image input formats are PNG, JPEG, WebP, HEIC, and HEIF.
 - Displays answers, citations, page numbers, media IDs, custom metadata, grounding supports, and raw grounding metadata when returned.
 - Highlights answer spans when Google returns `groundingSupports`; hover or focus the highlighted text to inspect the retrieved snippet, source title, page number, and optional image preview.
 - Can fetch cited media bytes by `media_id` when the API returns media citations.
@@ -133,6 +134,7 @@ According to the official guide, raw `File` objects uploaded through the File AP
 - Citation hover depends on Google returning `groundingSupports` span metadata. If no span metadata is returned, the app still shows the citation list and raw grounding metadata.
 - Google File Search currently documents multimodal image support for PNG and JPEG. The hover renderer can display common browser-safe raster formats if Google returns those bytes or if an admin views a locally archived image, but File Search ingestion is still limited by Google's supported formats.
 - Image hover previews depend on Google returning `media_id` values in grounding metadata, or on the citation metadata mapping to a local archived source image for an admin. If a PDF contains an embedded image but Google does not return a `media_id`, the app cannot know which embedded image to display in the hover card.
+- Ask-tab image attachments are prompt context, not File Search documents. They are sent inline to Gemini and are limited to about 18 MB combined in this app to stay below Google's 20 MB inline request guidance.
 
 ## Tests
 

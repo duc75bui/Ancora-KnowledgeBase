@@ -12,9 +12,11 @@ from .validation import validate_model
 
 
 ANSWER_SYSTEM_INSTRUCTION = (
-    "Answer using only content retrieved from the selected Google Gemini File Search store. "
-    "If the answer is not supported by retrieved store content, say that you do not know from "
-    "the selected store. Do not use web search, URL context, Google Search grounding, or outside knowledge."
+    "Use attached user images only as question context. Ground factual answers in content retrieved "
+    "from the selected Google Gemini File Search store. If a conclusion is based only on an attached "
+    "user image and not on retrieved store content, say so clearly. If the answer is not supported by "
+    "the uploaded image or retrieved store content, say that you do not know. Do not use web search, "
+    "URL context, Google Search grounding, or outside knowledge."
 )
 
 
@@ -23,6 +25,13 @@ class AnswerResult:
     text: str
     grounding: GroundingResult
     raw_response: Any
+
+
+@dataclass(frozen=True)
+class QueryImage:
+    filename: str
+    data: bytes
+    mime_type: str
 
 
 class QAEngine:
@@ -37,6 +46,7 @@ class QAEngine:
         file_search_store_name: str,
         metadata_filter: str | None = None,
         top_k: int | None = None,
+        query_images: list[QueryImage] | None = None,
     ) -> AnswerResult:
         validate_model(model)
         question = question.strip()
@@ -53,10 +63,13 @@ class QAEngine:
         if top_k:
             file_search_config["top_k"] = top_k
 
+        query_images = query_images or []
+        contents = build_contents(question, query_images)
+
         try:
             response = self.client.models.generate_content(
                 model=model,
-                contents=question,
+                contents=contents,
                 config=types.GenerateContentConfig(
                     system_instruction=ANSWER_SYSTEM_INSTRUCTION,
                     temperature=0.2,
@@ -74,3 +87,16 @@ class QAEngine:
             )
         except Exception as exc:
             raise GeminiAPIError(format_api_error(exc, self.secrets)) from None
+
+
+def build_contents(question: str, query_images: list[QueryImage]) -> str | list[Any]:
+    if not query_images:
+        return question
+    image_parts = [
+        types.Part.from_bytes(data=image.data, mime_type=image.mime_type)
+        for image in query_images
+    ]
+    return [
+        *image_parts,
+        question,
+    ]

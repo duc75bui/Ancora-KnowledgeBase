@@ -24,8 +24,8 @@ from src.file_search_manager import (
     object_to_dict,
 )
 from src.gemini_client import GeminiClientError, create_client
-from src.media_utils import data_url_for_displayable_image
-from src.qa_engine import QAEngine
+from src.media_utils import data_url_for_displayable_image, validate_query_image
+from src.qa_engine import QAEngine, QueryImage
 from src.source_registry import SourceRecord, SourceRegistry, source_id_from_custom_metadata
 from src.upload_manager import UploadManager
 from src.validation import accepted_extensions, safe_display_name, validate_file
@@ -269,6 +269,12 @@ def render_ask_tab(
 
     with st.form("ask-form"):
         question = st.text_area("Question", height=120)
+        query_image_files = st.file_uploader(
+            "Optional image context",
+            type=["png", "jpg", "jpeg", "webp", "heic", "heif"],
+            accept_multiple_files=True,
+            help="Gemini image input supports PNG, JPEG, WebP, HEIC, and HEIF. These images are prompt context, not File Search store documents.",
+        )
         metadata_filter = st.text_input("Optional metadata filter", placeholder='author="Robert Graves"')
         top_k = st.number_input("Optional top_k", min_value=0, max_value=50, value=0)
         include_media_previews = st.checkbox(
@@ -279,6 +285,10 @@ def render_ask_tab(
         submitted = st.form_submit_button("Ask")
 
     if submitted:
+        query_images = build_query_images(query_image_files or [])
+        if query_images is None:
+            return
+
         with st.spinner("Querying File Search"):
             try:
                 result = qa_engine.answer(
@@ -287,12 +297,15 @@ def render_ask_tab(
                     file_search_store_name=selected_store_name,
                     metadata_filter=metadata_filter.strip() or None,
                     top_k=int(top_k) if top_k else None,
+                    query_images=query_images,
                 )
             except (ValueError, GeminiAPIError) as exc:
                 st.error(str(exc))
                 return
 
         st.markdown("### Answer")
+        if query_images:
+            st.caption(f"Used {len(query_images)} uploaded image(s) as question context.")
         media_data_urls = {}
         source_image_data_urls = {}
         image_preview_notes = image_preview_notes_for_citations(
@@ -331,6 +344,33 @@ def render_ask_tab(
             st.json(result.grounding.raw_grounding_metadata or {})
         with st.expander("Raw response"):
             st.json(to_plain_data(result.raw_response))
+
+
+def build_query_images(uploaded_files: list[Any]) -> list[QueryImage] | None:
+    query_images: list[QueryImage] = []
+    total_bytes = 0
+    for uploaded_file in uploaded_files:
+        data = uploaded_file.getvalue()
+        validation = validate_query_image(
+            filename=uploaded_file.name,
+            data=data,
+            content_type=getattr(uploaded_file, "type", None),
+        )
+        if not validation.is_valid:
+            st.error(f"{uploaded_file.name}: {'; '.join(validation.errors)}")
+            return None
+        total_bytes += validation.size_bytes
+        if total_bytes > 18 * 1024 * 1024:
+            st.error("Combined inline query images must be under 18 MB.")
+            return None
+        query_images.append(
+            QueryImage(
+                filename=validation.filename,
+                data=data,
+                mime_type=validation.mime_type or "application/octet-stream",
+            )
+        )
+    return query_images
 
 
 def render_citations(
