@@ -8,7 +8,7 @@ import streamlit.components.v1 as components
 
 from src.answer_renderer import estimate_answer_height, render_answer_with_hover
 from src.auth import DEFAULT_ADMIN_PASSWORD, admin_password_from_env, verify_admin_password
-from src.citation_parser import Citation, to_plain_data
+from src.citation_parser import Citation, search_entry_point_html, to_plain_data
 from src.config import (
     APP_NAME,
     DEFAULT_MODEL,
@@ -26,7 +26,7 @@ from src.file_search_manager import (
 )
 from src.gemini_client import GeminiClientError, create_client
 from src.media_utils import data_url_for_displayable_image, validate_query_image
-from src.qa_engine import QAEngine, QueryImage
+from src.qa_engine import ANSWER_STYLE_INSTRUCTIONS, DEFAULT_ANSWER_STYLE, QAEngine, QueryImage
 from src.source_registry import SourceRecord, SourceRegistry, source_id_from_custom_metadata
 from src.upload_manager import UploadManager
 from src.validation import accepted_extensions, safe_display_name, validate_file
@@ -319,9 +319,6 @@ def render_ask_tab(
     is_admin: bool,
 ) -> None:
     st.subheader("Ask")
-    if not selected_store_name:
-        st.info("Select or create a File Search store first.")
-        return
 
     with st.form("ask-form"):
         question = st.text_area("Question", height=120)
@@ -330,6 +327,17 @@ def render_ask_tab(
             type=["png", "jpg", "jpeg", "webp", "heic", "heif"],
             accept_multiple_files=True,
             help="Gemini image input supports PNG, JPEG, WebP, HEIC, and HEIF. These images are prompt context, not File Search store documents.",
+        )
+        answer_style = st.selectbox(
+            "Answer depth",
+            options=list(ANSWER_STYLE_INSTRUCTIONS),
+            index=list(ANSWER_STYLE_INSTRUCTIONS).index(DEFAULT_ANSWER_STYLE),
+            help="Controls how concise or technically deep the answer should be while staying grounded in the selected source mode.",
+        )
+        use_web = st.checkbox(
+            "Get answers from web for generic questions",
+            value=False,
+            help="Uses Google Search grounding instead of the selected File Search store. Use this only for generic or current web questions, not knowledge-base questions.",
         )
         metadata_filter = st.text_input("Optional metadata filter", placeholder='author="Robert Graves"')
         top_k = st.number_input("Optional top_k", min_value=0, max_value=50, value=0)
@@ -345,21 +353,35 @@ def render_ask_tab(
         if query_images is None:
             return
 
+        if not use_web and not selected_store_name:
+            st.error("Select or create a File Search store, or enable web answers for a generic web question.")
+            return
+
         with st.spinner("Querying File Search"):
             try:
-                result = qa_engine.answer(
-                    question=question,
-                    model=model,
-                    file_search_store_name=selected_store_name,
-                    metadata_filter=metadata_filter.strip() or None,
-                    top_k=int(top_k) if top_k else None,
-                    query_images=query_images,
-                )
+                if use_web:
+                    result = qa_engine.answer_web(
+                        question=question,
+                        model=model,
+                        query_images=query_images,
+                        answer_style=answer_style,
+                    )
+                else:
+                    result = qa_engine.answer(
+                        question=question,
+                        model=model,
+                        file_search_store_name=selected_store_name or "",
+                        metadata_filter=metadata_filter.strip() or None,
+                        top_k=int(top_k) if top_k else None,
+                        query_images=query_images,
+                        answer_style=answer_style,
+                    )
             except (ValueError, GeminiAPIError) as exc:
                 st.error(str(exc))
                 return
 
         st.markdown("### Answer")
+        st.caption("Source mode: Google Search grounding" if use_web else "Source mode: selected File Search store")
         if query_images:
             st.caption(f"Used {len(query_images)} uploaded image(s) as question context.")
         media_data_urls = {}
@@ -396,6 +418,7 @@ def render_ask_tab(
         else:
             st.markdown("_No text returned._")
         render_citations(file_search, source_registry, result.grounding.citations, is_admin)
+        render_search_entry_point(result.raw_response)
         with st.expander("Raw grounding metadata"):
             st.json(result.grounding.raw_grounding_metadata or {})
         with st.expander("Raw response"):
@@ -446,6 +469,8 @@ def render_citations(
             st.json(citation.to_dict())
             if citation.text:
                 st.write(citation.text)
+            if citation.uri:
+                st.markdown(f"[Open source]({citation.uri})")
             render_citation_source_controls(
                 source_registry=source_registry,
                 citation=citation,
@@ -463,6 +488,14 @@ def render_citations(
                     )
                 except GeminiAPIError as exc:
                     st.error(str(exc))
+
+
+def render_search_entry_point(raw_response: Any) -> None:
+    rendered_content = search_entry_point_html(raw_response)
+    if not rendered_content:
+        return
+    with st.expander("Google Search suggestions"):
+        components.html(rendered_content, height=120, scrolling=True)
 
 
 def render_documents_tab(

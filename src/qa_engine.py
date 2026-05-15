@@ -19,6 +19,29 @@ ANSWER_SYSTEM_INSTRUCTION = (
     "URL context, Google Search grounding, or outside knowledge."
 )
 
+WEB_ANSWER_SYSTEM_INSTRUCTION = (
+    "Use Google Search grounding for this generic web question. Do not use a File Search store. "
+    "Base factual claims on the returned web grounding metadata, and say when the web results do not "
+    "support a confident answer."
+)
+
+ANSWER_STYLE_INSTRUCTIONS: dict[str, str] = {
+    "Concise": (
+        "Be concise. Answer in 2-5 focused sentences unless the user asks for more detail. "
+        "Keep citations and caveats, but avoid long background."
+    ),
+    "Balanced": (
+        "Use a balanced level of detail. Give the direct answer first, then include the most relevant "
+        "supporting details from the sources."
+    ),
+    "Very deep technical": (
+        "Provide a deep technical answer grounded in the sources. Include architecture, implementation "
+        "details, edge cases, assumptions, limitations, and source-backed reasoning. Use headings or "
+        "bullets when they improve clarity."
+    ),
+}
+DEFAULT_ANSWER_STYLE = "Balanced"
+
 
 @dataclass(frozen=True)
 class AnswerResult:
@@ -47,6 +70,7 @@ class QAEngine:
         metadata_filter: str | None = None,
         top_k: int | None = None,
         query_images: list[QueryImage] | None = None,
+        answer_style: str = DEFAULT_ANSWER_STYLE,
     ) -> AnswerResult:
         validate_model(model)
         question = question.strip()
@@ -71,11 +95,54 @@ class QAEngine:
                 model=model,
                 contents=contents,
                 config=types.GenerateContentConfig(
-                    system_instruction=ANSWER_SYSTEM_INSTRUCTION,
+                    system_instruction=build_system_instruction(
+                        ANSWER_SYSTEM_INSTRUCTION,
+                        answer_style,
+                    ),
                     temperature=0.2,
                     tools=[
                         types.Tool(
                             file_search=types.FileSearch(**file_search_config),
+                        )
+                    ],
+                ),
+            )
+            return AnswerResult(
+                text=getattr(response, "text", "") or "",
+                grounding=parse_grounding_metadata(response),
+                raw_response=response,
+            )
+        except Exception as exc:
+            raise GeminiAPIError(format_api_error(exc, self.secrets)) from None
+
+    def answer_web(
+        self,
+        question: str,
+        model: str,
+        query_images: list[QueryImage] | None = None,
+        answer_style: str = DEFAULT_ANSWER_STYLE,
+    ) -> AnswerResult:
+        validate_model(model)
+        question = question.strip()
+        if not question:
+            raise ValueError("Question is required.")
+
+        query_images = query_images or []
+        contents = build_contents(question, query_images)
+
+        try:
+            response = self.client.models.generate_content(
+                model=model,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=build_system_instruction(
+                        WEB_ANSWER_SYSTEM_INSTRUCTION,
+                        answer_style,
+                    ),
+                    temperature=0.2,
+                    tools=[
+                        types.Tool(
+                            google_search=types.GoogleSearch(),
                         )
                     ],
                 ),
@@ -100,3 +167,11 @@ def build_contents(question: str, query_images: list[QueryImage]) -> str | list[
         *image_parts,
         question,
     ]
+
+
+def build_system_instruction(base_instruction: str, answer_style: str) -> str:
+    style_instruction = ANSWER_STYLE_INSTRUCTIONS.get(
+        answer_style,
+        ANSWER_STYLE_INSTRUCTIONS[DEFAULT_ANSWER_STYLE],
+    )
+    return f"{base_instruction}\n\nResponse style: {style_instruction}"

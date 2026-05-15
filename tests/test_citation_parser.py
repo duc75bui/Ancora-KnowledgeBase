@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from src.citation_parser import parse_grounding_metadata
+from src.citation_parser import parse_grounding_metadata, search_entry_point_html
 
 
 def test_parse_grounding_metadata_from_dict():
@@ -57,3 +57,31 @@ def test_parse_grounding_metadata_from_sdk_like_objects():
 
     assert result.citations[0].title == "image"
     assert result.citations[0].media_id == "media-1"
+
+
+def test_parse_google_search_web_grounding_metadata():
+    response = {
+        "candidates": [
+            {
+                "groundingMetadata": {
+                    "searchEntryPoint": {"renderedContent": "<div>search suggestions</div>"},
+                    "groundingChunks": [
+                        {"web": {"uri": "https://example.com/source", "title": "Example Source"}}
+                    ],
+                    "groundingSupports": [
+                        {
+                            "segment": {"startIndex": 0, "endIndex": 12, "text": "Web answer."},
+                            "groundingChunkIndices": [0],
+                        }
+                    ],
+                }
+            }
+        ]
+    }
+
+    result = parse_grounding_metadata(response)
+
+    assert result.citations[0].title == "Example Source"
+    assert result.citations[0].uri == "https://example.com/source"
+    assert result.support_spans[0].citation_indices == [0]
+    assert search_entry_point_html(response) == "<div>search suggestions</div>"

@@ -65,6 +65,8 @@ Fix it by creating or selecting a Gemini API key in Google AI Studio, or by edit
 - Admin users can connect or change the Gemini API key when it is not loaded from `.env`; connected keys are masked and disabled in the sidebar.
 - Lets users choose a File Search-supported Gemini model.
 - Lets users choose the File Search store to ask against.
+- Lets users choose answer depth: Concise, Balanced, or Very deep technical.
+- Lets users switch Ask into Google Search grounding mode for generic/current web questions.
 - Normal users only see the Ask workflow.
 - Admin users can list, create, select, and delete Google Gemini File Search stores.
 - Creates stores with `models/gemini-embedding-2` so text and PNG/JPEG images can be used for multimodal File Search.
@@ -75,6 +77,7 @@ Fix it by creating or selecting a Gemini API key in Google AI Studio, or by edit
 - Admin users can view long-running upload/import operation output.
 - Admin users can list and delete File Search documents in a selected store.
 - Asks questions with only the File Search tool attached to `generate_content`.
+- When web-answer mode is enabled, asks with Google Search grounding instead of File Search.
 - Lets the user attach optional query-context images in the Ask tab using Gemini inline image input. Supported image input formats are PNG, JPEG, WebP, HEIC, and HEIF.
 - Displays answers, citations, page numbers, media IDs, custom metadata, grounding supports, and raw grounding metadata when returned.
 - Highlights answer spans when Google returns `groundingSupports`; hover or focus the highlighted text to inspect the retrieved snippet, source title, page number, and optional image preview.
@@ -129,6 +132,7 @@ According to the official guide, raw `File` objects uploaded through the File AP
 - Maximum file size per document is 100 MB.
 - File Search is not supported in the Live API.
 - File Search cannot currently be combined with tools such as Google Search grounding or URL Context.
+- The web-answer toggle is a separate source mode. It uses Google Search grounding instead of the selected File Search store because File Search and Google Search grounding are not treated as one combined retrieval source in this app.
 - Store size limits depend on account tier; Google recommends keeping each store under 20 GB for retrieval latency.
 - This app uses Google-managed default chunking. It does not expose custom chunk sizes yet.
 - The local MIME allowlist covers common official types rather than every MIME type listed in the guide.

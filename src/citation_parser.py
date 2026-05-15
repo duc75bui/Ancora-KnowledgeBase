@@ -45,22 +45,30 @@ def parse_grounding_metadata(response_or_metadata: Any) -> GroundingResult:
     chunk_to_citation_index: dict[int, int] = {}
     for chunk_index, chunk in enumerate(chunks):
         retrieved_context = _get(chunk, "retrieved_context", "retrievedContext")
-        if not retrieved_context:
-            continue
-
-        citations.append(
-            Citation(
-                title=_get(retrieved_context, "title"),
-                text=_get(retrieved_context, "text"),
-                uri=_get(retrieved_context, "uri"),
-                file_search_store=_get(retrieved_context, "file_search_store", "fileSearchStore"),
-                page_number=_get(retrieved_context, "page_number", "pageNumber"),
-                media_id=_get(retrieved_context, "media_id", "mediaId"),
-                custom_metadata=_normalize_custom_metadata(
-                    _get(retrieved_context, "custom_metadata", "customMetadata")
-                ),
+        web_context = _get(chunk, "web")
+        if retrieved_context:
+            citations.append(
+                Citation(
+                    title=_get(retrieved_context, "title"),
+                    text=_get(retrieved_context, "text"),
+                    uri=_get(retrieved_context, "uri"),
+                    file_search_store=_get(retrieved_context, "file_search_store", "fileSearchStore"),
+                    page_number=_get(retrieved_context, "page_number", "pageNumber"),
+                    media_id=_get(retrieved_context, "media_id", "mediaId"),
+                    custom_metadata=_normalize_custom_metadata(
+                        _get(retrieved_context, "custom_metadata", "customMetadata")
+                    ),
+                )
             )
-        )
+        elif web_context:
+            citations.append(
+                Citation(
+                    title=_get(web_context, "title"),
+                    uri=_get(web_context, "uri"),
+                )
+            )
+        else:
+            continue
         chunk_to_citation_index[chunk_index] = len(citations) - 1
 
     return GroundingResult(
@@ -87,6 +95,13 @@ def to_plain_data(value: Any) -> Any:
             if not key.startswith("_") and item is not None
         }
     return value
+
+
+def search_entry_point_html(response_or_metadata: Any) -> str | None:
+    metadata = _extract_grounding_metadata(response_or_metadata)
+    search_entry_point = _get(metadata, "search_entry_point", "searchEntryPoint")
+    rendered_content = _get(search_entry_point, "rendered_content", "renderedContent")
+    return rendered_content if isinstance(rendered_content, str) else None
 
 
 def _extract_grounding_metadata(response_or_metadata: Any) -> Any:

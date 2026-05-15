@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from src.file_search_manager import GeminiAPIError
-from src.qa_engine import QAEngine, QueryImage
+from src.qa_engine import QAEngine, QueryImage, build_system_instruction
 
 
 class FakeModels:
@@ -52,6 +52,7 @@ def test_query_uses_only_file_search_tool_for_selected_store():
     assert config.tools[0].url_context is None
     assert result.text == "Grounded answer"
     assert result.grounding.citations[0].title == "doc.txt"
+    assert "balanced level of detail" in config.system_instruction
 
 
 def test_query_can_include_inline_image_context():
@@ -76,6 +77,31 @@ def test_query_can_include_inline_image_context():
     assert contents[0].inline_data.mime_type == "image/png"
     assert contents[0].inline_data.data == b"\x89PNG\r\n\x1a\nimage"
     assert contents[1] == "What store policy applies to this screenshot?"
+
+
+def test_web_query_uses_google_search_tool_not_file_search():
+    client = FakeClient()
+    engine = QAEngine(client)
+
+    engine.answer_web(
+        question="Who won the latest major product award?",
+        model="gemini-3-flash-preview",
+        answer_style="Very deep technical",
+    )
+
+    _, contents, config = client.models.call
+    assert contents == "Who won the latest major product award?"
+    assert len(config.tools) == 1
+    assert config.tools[0].google_search is not None
+    assert config.tools[0].file_search is None
+    assert "deep technical answer" in config.system_instruction
+
+
+def test_build_system_instruction_falls_back_to_balanced_style():
+    instruction = build_system_instruction("Base", "Unknown")
+
+    assert instruction.startswith("Base")
+    assert "balanced level of detail" in instruction
 
 
 def test_query_api_errors_are_sanitized():
