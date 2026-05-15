@@ -10,4 +10,5 @@ __pycache__/
 .tmp_uploads/
 tmp_uploads/
 .source_files/
+.app_config/
 *.log

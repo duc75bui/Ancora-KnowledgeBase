@@ -122,7 +122,7 @@ def is_supported_model(model: str) -> bool:
 
 
 def validate_model(model: str) -> str:
-    if not is_supported_model(model):
+    if not model or not model.startswith("gemini-"):
         raise ValueError(f"Unsupported File Search model: {model}")
     return model
 

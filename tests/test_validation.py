@@ -16,9 +16,9 @@ def test_supported_model_validation_accepts_documented_models():
         assert validate_model(model) == model
 
 
-def test_supported_model_validation_rejects_unknown_model():
+def test_model_validation_rejects_malformed_model():
     with pytest.raises(ValueError):
-        validate_model("gemini-unknown")
+        validate_model("text-embedding-004")
 
 
 def test_validate_file_accepts_pdf():

@@ -64,6 +64,7 @@ Fix it by creating or selecting a Gemini API key in Google AI Studio, or by edit
 - Loads `GEMINI_API_KEY` from `.env` or accepts a key in the UI.
 - Admin users can connect or change the Gemini API key when it is not loaded from `.env`; connected keys are masked and disabled in the sidebar.
 - Lets users choose a File Search-supported Gemini model.
+- Admins can refresh Gemini models from the Models API and approve additional model IDs for the picker.
 - Lets users choose the File Search store to ask against.
 - Lets users choose answer depth: Concise, Balanced, or Very deep technical.
 - Lets users switch Ask into Google Search grounding mode for generic/current web questions.

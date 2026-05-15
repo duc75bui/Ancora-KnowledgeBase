@@ -27,6 +27,7 @@ Important local folders:
 
 - `.source_files\` stores local original-file archives for admin viewing.
 - `.tmp_uploads\` stores temporary local upload copies.
+- `.app_config\models.json` stores admin-approved model picker additions.
 - `.venv\` stores the Python virtual environment.
 
 These folders are intentionally not committed to git.
@@ -171,6 +172,7 @@ Back up:
 
 - `.env`
 - `.source_files\`
+- `.app_config\`
 - optionally `.tmp_uploads\` if needed for troubleshooting
 - the git repository or release package
 

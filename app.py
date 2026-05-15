@@ -26,6 +26,7 @@ from src.file_search_manager import (
 )
 from src.gemini_client import GeminiClientError, create_client
 from src.media_utils import data_url_for_displayable_image, validate_query_image
+from src.model_manager import ModelInfo, ModelManager, ModelManagerError, default_model_from
 from src.qa_engine import ANSWER_STYLE_INSTRUCTIONS, DEFAULT_ANSWER_STYLE, QAEngine, QueryImage
 from src.source_registry import SourceRecord, SourceRegistry, source_id_from_custom_metadata
 from src.upload_manager import UploadManager
@@ -47,7 +48,9 @@ def main() -> None:
     config = load_config()
     is_admin = render_admin_controls()
     api_key = render_api_key_controls(config.api_key, is_admin=is_admin)
-    model = render_model_controls()
+    model_manager = ModelManager()
+    approved_models = model_manager.approved_models()
+    model = render_model_controls(approved_models)
 
     if not api_key:
         st.info("Admin login is required to connect a Gemini API key before users can ask questions.")
@@ -81,8 +84,11 @@ def main() -> None:
             file_search=file_search,
             upload_manager=upload_manager,
             source_registry=source_registry,
+            model_manager=model_manager,
+            approved_models=approved_models,
             stores=stores,
             selected_store_name=selected_store_name,
+            api_key=api_key,
         )
 
 
@@ -123,16 +129,17 @@ def render_api_key_controls(env_api_key: str | None, is_admin: bool) -> str | No
     return None
 
 
-def render_model_controls() -> str:
-    model_ids = list(SUPPORTED_FILE_SEARCH_MODELS)
-    default_index = model_ids.index(DEFAULT_MODEL) if DEFAULT_MODEL in model_ids else 0
+def render_model_controls(approved_models: dict[str, str]) -> str:
+    model_ids = list(approved_models)
+    default_model = default_model_from(approved_models)
+    default_index = model_ids.index(default_model) if default_model in model_ids else 0
     selected = st.sidebar.selectbox(
         "File Search model",
         options=model_ids,
         index=default_index,
-        format_func=lambda model: f"{SUPPORTED_FILE_SEARCH_MODELS[model]} ({model})",
+        format_func=lambda model: f"{approved_models[model]} ({model})",
     )
-    st.sidebar.caption("Model list follows the File Search supported models table.")
+    st.sidebar.caption("Admins can refresh and approve additional Gemini models.")
     return selected
 
 
@@ -195,13 +202,16 @@ def render_admin_panel(
     file_search: FileSearchManager,
     upload_manager: UploadManager,
     source_registry: SourceRegistry,
+    model_manager: ModelManager,
+    approved_models: dict[str, str],
     stores: list[Any],
     selected_store_name: str | None,
+    api_key: str,
 ) -> None:
     st.divider()
     st.subheader("Admin")
-    stores_tab, upload_tab, documents_tab = st.tabs(
-        ["Stores", "Upload", "Documents"]
+    stores_tab, upload_tab, documents_tab, models_tab = st.tabs(
+        ["Stores", "Upload", "Documents", "Models"]
     )
     with stores_tab:
         render_stores_tab(file_search, stores)
@@ -209,6 +219,85 @@ def render_admin_panel(
         render_upload_tab(upload_manager, source_registry, selected_store_name)
     with documents_tab:
         render_documents_tab(file_search, source_registry, selected_store_name, is_admin=True)
+    with models_tab:
+        render_models_tab(model_manager, approved_models, file_search.client, api_key)
+
+
+def render_models_tab(
+    model_manager: ModelManager,
+    approved_models: dict[str, str],
+    client: Any,
+    api_key: str,
+) -> None:
+    st.subheader("Approved models")
+    st.caption(
+        "Defaults follow the File Search docs. Refreshed models are candidates; approve only after confirming they work for this app."
+    )
+    st.dataframe(
+        [
+            {"model_id": model_id, "display_name": display_name}
+            for model_id, display_name in approved_models.items()
+        ],
+        width="stretch",
+    )
+
+    custom_model = st.text_input("Approve model ID manually", placeholder="gemini-...")
+    custom_display_name = st.text_input("Display name", placeholder="Gemini ...")
+    if st.button("Approve manual model", disabled=not custom_model):
+        try:
+            model_manager.approve_model(custom_model, custom_display_name or custom_model)
+            st.success(f"Approved {custom_model}")
+            st.rerun()
+        except ValueError as exc:
+            st.error(str(exc))
+
+    removable = [
+        model_id
+        for model_id in approved_models
+        if model_id not in SUPPORTED_FILE_SEARCH_MODELS
+    ]
+    if removable:
+        target = st.selectbox("Remove admin-approved model", removable)
+        if st.button("Remove approved model"):
+            model_manager.remove_approved_model(target)
+            st.success(f"Removed {target}")
+            st.rerun()
+
+    st.divider()
+    if st.button("Refresh available Gemini models"):
+        try:
+            discovered = model_manager.refresh_from_client(client, secrets=[api_key])
+            st.success(f"Discovered {len(discovered)} generateContent-capable model(s).")
+        except ModelManagerError as exc:
+            st.error(str(exc))
+
+    discovered = model_manager.discovered_models()
+    if not discovered:
+        st.caption("No refreshed model list is stored yet.")
+        return
+
+    st.dataframe(
+        [
+            {
+                "model_id": model.model_id,
+                "display_name": model.display_name,
+                "approved": model.model_id in approved_models,
+            }
+            for model in discovered
+        ],
+        width="stretch",
+    )
+    candidates = [model for model in discovered if model.model_id not in approved_models]
+    if candidates:
+        selected = st.selectbox(
+            "Approve discovered model",
+            candidates,
+            format_func=lambda model: f"{model.display_name} ({model.model_id})",
+        )
+        if st.button("Approve discovered model"):
+            model_manager.approve_model(selected.model_id, selected.display_name)
+            st.success(f"Approved {selected.model_id}")
+            st.rerun()
 
 
 def render_stores_tab(file_search: FileSearchManager, stores: list[Any]) -> None:
