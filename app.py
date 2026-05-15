@@ -8,7 +8,12 @@ import streamlit.components.v1 as components
 
 from src.answer_renderer import estimate_answer_height, render_answer_with_hover
 from src.auth import DEFAULT_ADMIN_PASSWORD, admin_password_from_env, verify_admin_password
-from src.citation_parser import Citation, search_entry_point_html, to_plain_data
+from src.citation_parser import (
+    Citation,
+    search_entry_point_html,
+    supplement_missing_citation_details,
+    to_plain_data,
+)
 from src.config import (
     APP_NAME,
     DEFAULT_MODEL,
@@ -632,6 +637,14 @@ def render_ask_tab(
                         top_k=int(top_k) if top_k else None,
                         query_images=query_images,
                         answer_style=answer_style,
+                    )
+                    result = type(result)(
+                        text=result.text,
+                        grounding=supplement_missing_citation_details(
+                            result.grounding,
+                            initial_result.grounding,
+                        ),
+                        raw_response=result.raw_response,
                     )
                 except (ValueError, GeminiAPIError) as exc:
                     st.warning(f"Review pass failed; showing the initial answer. {exc}")

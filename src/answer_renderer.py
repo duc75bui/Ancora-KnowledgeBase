@@ -93,6 +93,9 @@ def _tooltip_html(
             continue
         citation = citations[index]
         title = citation.title or citation.uri or citation.media_id or "Retrieved context"
+        display_title = title
+        if citation.page_number is not None:
+            display_title = f"{title} (page {citation.page_number})"
         meta_bits = []
         if citation.page_number is not None:
             meta_bits.append(f"page {citation.page_number}")
@@ -108,7 +111,7 @@ def _tooltip_html(
         )
         sections.append(
             '<span class="tooltip-section">'
-            f'<span class="tooltip-title">{html.escape(title)}</span>'
+            f'<span class="tooltip-title">{html.escape(display_title)}</span>'
             f'<span class="tooltip-meta">{html.escape(" | ".join(meta_bits))}</span>'
             f"{media_preview}"
             f'<span class="tooltip-snippet">{html.escape(snippet)}</span>'
@@ -150,6 +153,14 @@ def _media_preview_html(
     if not data_url:
         if note:
             return f'<span class="tooltip-image-note">{html.escape(note)}</span>'
+        if title.lower().endswith(".pdf"):
+            return (
+                '<span class="tooltip-image-note">'
+                "No PDF image preview was returned. File Search can use embedded PDF images for "
+                "retrieval, but the app can only show an image in hover when grounding metadata "
+                "includes a downloadable media ID."
+                "</span>"
+            )
         return '<span class="tooltip-image-note">No image preview handle was returned for this citation.</span>'
     return (
         '<span class="tooltip-image-label">'

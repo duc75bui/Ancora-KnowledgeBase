@@ -29,6 +29,7 @@ def test_render_answer_wraps_supported_span_with_hover_citation():
     assert rendered.span_count == 1
     assert "citation-span" in rendered.html
     assert "policy.pdf" in rendered.html
+    assert "policy.pdf (page 3)" in rendered.html
     assert "page 3" in rendered.html
     assert "<script>" not in rendered.html
     assert "&lt;script&gt;" in rendered.html
@@ -161,3 +162,24 @@ def test_render_answer_explains_missing_image_preview():
 
     assert "No image preview handle was returned for this citation." in rendered.html
     assert "diagram.png" in rendered.html
+
+
+def test_render_answer_explains_missing_pdf_image_media_preview():
+    grounding = GroundingResult(
+        citations=[Citation(title="architecture.pdf", text="The diagram shows the API tier.")],
+        grounding_supports=[],
+        support_spans=[
+            GroundingSupportSpan(
+                start_index=0,
+                end_index=11,
+                text="The diagram",
+                citation_indices=[0],
+            )
+        ],
+        raw_grounding_metadata=None,
+    )
+
+    rendered = render_answer_with_hover("The diagram shows the API tier.", grounding)
+
+    assert "No PDF image preview was returned." in rendered.html
+    assert "downloadable media ID" in rendered.html

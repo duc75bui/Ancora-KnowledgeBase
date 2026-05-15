@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import Any
 
 
@@ -79,6 +79,37 @@ def parse_grounding_metadata(response_or_metadata: Any) -> GroundingResult:
     )
 
 
+def supplement_missing_citation_details(
+    primary: GroundingResult,
+    fallback: GroundingResult | None,
+) -> GroundingResult:
+    """Fill missing citation details from an earlier grounding result."""
+    if not fallback or not primary.citations or not fallback.citations:
+        return primary
+
+    citations: list[Citation] = []
+    for index, citation in enumerate(primary.citations):
+        fallback_citation = _matching_fallback_citation(index, citation, fallback.citations)
+        if fallback_citation is None:
+            citations.append(citation)
+            continue
+        citations.append(
+            replace(
+                citation,
+                text=citation.text or fallback_citation.text,
+                uri=citation.uri or fallback_citation.uri,
+                file_search_store=citation.file_search_store or fallback_citation.file_search_store,
+                page_number=citation.page_number
+                if citation.page_number is not None
+                else fallback_citation.page_number,
+                media_id=citation.media_id or fallback_citation.media_id,
+                custom_metadata=citation.custom_metadata or fallback_citation.custom_metadata,
+            )
+        )
+
+    return replace(primary, citations=citations)
+
+
 def to_plain_data(value: Any) -> Any:
     if value is None:
         return None
@@ -116,6 +147,52 @@ def _extract_grounding_metadata(response_or_metadata: Any) -> Any:
     if candidates:
         return _get(candidates[0], "grounding_metadata", "groundingMetadata")
     return response_or_metadata
+
+
+def _matching_fallback_citation(
+    index: int,
+    citation: Citation,
+    fallback_citations: list[Citation],
+) -> Citation | None:
+    if index < len(fallback_citations):
+        fallback = fallback_citations[index]
+        if _strong_citations_match(citation, fallback):
+            return fallback
+        if _same_title(citation, fallback) and _title_is_unique(citation.title, fallback_citations):
+            return fallback
+
+    strong_matches = [
+        fallback
+        for fallback in fallback_citations
+        if _strong_citations_match(citation, fallback)
+    ]
+    if len(strong_matches) == 1:
+        return strong_matches[0]
+
+    if citation.title and _title_is_unique(citation.title, fallback_citations):
+        for fallback in fallback_citations:
+            if _same_title(citation, fallback):
+                return fallback
+    return None
+
+
+def _strong_citations_match(left: Citation, right: Citation) -> bool:
+    for field_name in ("media_id", "uri"):
+        left_value = getattr(left, field_name)
+        right_value = getattr(right, field_name)
+        if left_value and right_value and left_value == right_value:
+            return True
+    return False
+
+
+def _same_title(left: Citation, right: Citation) -> bool:
+    return bool(left.title and right.title and left.title == right.title)
+
+
+def _title_is_unique(title: str | None, citations: list[Citation]) -> bool:
+    if not title:
+        return False
+    return sum(1 for citation in citations if citation.title == title) == 1
 
 
 def _normalize_custom_metadata(metadata: Any) -> list[dict[str, Any]] | None:

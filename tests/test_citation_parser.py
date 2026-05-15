@@ -1,6 +1,13 @@
 from types import SimpleNamespace
 
-from src.citation_parser import parse_grounding_metadata, search_entry_point_html
+from src.citation_parser import (
+    Citation,
+    GroundingResult,
+    GroundingSupportSpan,
+    parse_grounding_metadata,
+    search_entry_point_html,
+    supplement_missing_citation_details,
+)
 
 
 def test_parse_grounding_metadata_from_dict():
@@ -85,3 +92,63 @@ def test_parse_google_search_web_grounding_metadata():
     assert result.citations[0].uri == "https://example.com/source"
     assert result.support_spans[0].citation_indices == [0]
     assert search_entry_point_html(response) == "<div>search suggestions</div>"
+
+
+def test_supplement_missing_citation_details_preserves_review_pass_supports():
+    reviewed = GroundingResult(
+        citations=[Citation(title="manual.pdf", text="Reviewed snippet")],
+        grounding_supports=[],
+        support_spans=[
+            GroundingSupportSpan(
+                start_index=0,
+                end_index=8,
+                text="Reviewed",
+                citation_indices=[0],
+            )
+        ],
+        raw_grounding_metadata={"reviewed": True},
+    )
+    initial = GroundingResult(
+        citations=[
+            Citation(
+                title="manual.pdf",
+                text="Initial snippet",
+                page_number=7,
+                media_id="fileSearchStores/store/media/blob-1",
+                custom_metadata=[{"key": "source_id", "stringValue": "source-1"}],
+            )
+        ],
+        grounding_supports=[],
+        support_spans=[],
+        raw_grounding_metadata={"initial": True},
+    )
+
+    result = supplement_missing_citation_details(reviewed, initial)
+
+    assert result.citations[0].text == "Reviewed snippet"
+    assert result.citations[0].page_number == 7
+    assert result.citations[0].media_id == "fileSearchStores/store/media/blob-1"
+    assert result.citations[0].custom_metadata == [{"key": "source_id", "stringValue": "source-1"}]
+    assert result.support_spans == reviewed.support_spans
+
+
+def test_supplement_missing_citation_details_skips_ambiguous_title_matches():
+    reviewed = GroundingResult(
+        citations=[Citation(title="manual.pdf", text="Reviewed snippet")],
+        grounding_supports=[],
+        support_spans=[],
+        raw_grounding_metadata=None,
+    )
+    initial = GroundingResult(
+        citations=[
+            Citation(title="manual.pdf", page_number=3),
+            Citation(title="manual.pdf", page_number=9),
+        ],
+        grounding_supports=[],
+        support_spans=[],
+        raw_grounding_metadata=None,
+    )
+
+    result = supplement_missing_citation_details(reviewed, initial)
+
+    assert result.citations[0].page_number is None
