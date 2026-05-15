@@ -19,6 +19,14 @@ ANSWER_SYSTEM_INSTRUCTION = (
     "URL context, Google Search grounding, or outside knowledge."
 )
 
+REVERIFY_SYSTEM_INSTRUCTION = (
+    "Perform a source-grounded review pass using only content retrieved from the selected "
+    "Google Gemini File Search store. Re-analyze the question and the initial answer against "
+    "the retrieved store evidence. Return the final answer, correcting or removing any claim "
+    "that is not supported by the store. If the store does not support an answer, say that "
+    "clearly. Do not use web search, URL context, Google Search grounding, or outside knowledge."
+)
+
 WEB_ANSWER_SYSTEM_INSTRUCTION = (
     "Use Google Search grounding for this generic web question. Do not use a File Search store. "
     "Base factual claims on the returned web grounding metadata, and say when the web results do not "
@@ -115,6 +123,64 @@ class QAEngine:
         except Exception as exc:
             raise GeminiAPIError(format_api_error(exc, self.secrets)) from None
 
+    def reverify_answer(
+        self,
+        question: str,
+        draft_answer: str,
+        model: str,
+        file_search_store_name: str,
+        metadata_filter: str | None = None,
+        top_k: int | None = None,
+        query_images: list[QueryImage] | None = None,
+        answer_style: str = DEFAULT_ANSWER_STYLE,
+    ) -> AnswerResult:
+        validate_model(model)
+        question = question.strip()
+        draft_answer = draft_answer.strip()
+        if not question:
+            raise ValueError("Question is required.")
+        if not draft_answer:
+            raise ValueError("Initial answer is required for review.")
+        if not file_search_store_name:
+            raise ValueError("A File Search store is required.")
+
+        file_search_config: dict[str, Any] = {
+            "file_search_store_names": [file_search_store_name],
+        }
+        if metadata_filter:
+            file_search_config["metadata_filter"] = metadata_filter
+        if top_k:
+            file_search_config["top_k"] = top_k
+
+        prompt = build_review_prompt(question, draft_answer)
+        query_images = query_images or []
+        contents = build_contents(prompt, query_images)
+
+        try:
+            response = self.client.models.generate_content(
+                model=model,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=build_system_instruction(
+                        REVERIFY_SYSTEM_INSTRUCTION,
+                        answer_style,
+                    ),
+                    temperature=0.1,
+                    tools=[
+                        types.Tool(
+                            file_search=types.FileSearch(**file_search_config),
+                        )
+                    ],
+                ),
+            )
+            return AnswerResult(
+                text=getattr(response, "text", "") or "",
+                grounding=parse_grounding_metadata(response),
+                raw_response=response,
+            )
+        except Exception as exc:
+            raise GeminiAPIError(format_api_error(exc, self.secrets)) from None
+
     def answer_web(
         self,
         question: str,
@@ -167,6 +233,20 @@ def build_contents(question: str, query_images: list[QueryImage]) -> str | list[
         *image_parts,
         question,
     ]
+
+
+def build_review_prompt(question: str, draft_answer: str) -> str:
+    return (
+        "Question:\n"
+        f"{question}\n\n"
+        "Initial answer to review:\n"
+        f"{draft_answer}\n\n"
+        "Review task:\n"
+        "1. Re-query and re-analyze the selected File Search store evidence.\n"
+        "2. Check whether the initial answer directly answers the question.\n"
+        "3. Correct unsupported, incomplete, or overconfident claims.\n"
+        "4. Return the final answer only, grounded in the retrieved store content."
+    )
 
 
 def build_system_instruction(base_instruction: str, answer_style: str) -> str:

@@ -7,6 +7,7 @@ import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from .validation import safe_display_name
 
@@ -26,13 +27,17 @@ class SourceRecord:
     file_search_store_name: str
     created_at: str
     document_name: str | None = None
+    custom_metadata: list[dict[str, Any]] | None = None
 
-    def to_file_search_metadata(self) -> list[dict[str, str]]:
-        return [
+    def to_file_search_metadata(self) -> list[dict[str, Any]]:
+        metadata: list[dict[str, Any]] = [
             {"key": "source_id", "string_value": self.source_id},
             {"key": "source_filename", "string_value": self.original_filename},
             {"key": "source_sha256", "string_value": self.sha256},
         ]
+        if self.custom_metadata:
+            metadata.extend(self.custom_metadata)
+        return metadata
 
 
 class SourceRegistry:
@@ -47,6 +52,7 @@ class SourceRegistry:
         data: bytes,
         mime_type: str,
         file_search_store_name: str,
+        custom_metadata: list[dict[str, Any]] | None = None,
     ) -> SourceRecord:
         source_id = uuid.uuid4().hex
         display_name = safe_display_name(filename)
@@ -64,6 +70,7 @@ class SourceRegistry:
             sha256=hashlib.sha256(data).hexdigest(),
             file_search_store_name=file_search_store_name,
             created_at=datetime.now(timezone.utc).isoformat(),
+            custom_metadata=custom_metadata,
         )
         records = self.list_records()
         records.append(record)

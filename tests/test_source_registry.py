@@ -9,6 +9,7 @@ def test_source_registry_saves_metadata_and_file(tmp_path):
         data=b"%PDF data",
         mime_type="application/pdf",
         file_search_store_name="fileSearchStores/store-1",
+        custom_metadata=[{"key": "department", "string_value": "Support"}],
     )
 
     assert registry.get(record.source_id) == record
@@ -18,6 +19,7 @@ def test_source_registry_saves_metadata_and_file(tmp_path):
 
     metadata = record.to_file_search_metadata()
     assert source_id_from_custom_metadata(metadata) == record.source_id
+    assert {"key": "department", "string_value": "Support"} in metadata
 
 
 def test_source_registry_deletes_file_and_manifest_record(tmp_path):

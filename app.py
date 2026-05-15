@@ -28,6 +28,14 @@ from src.file_search_manager import (
 )
 from src.gemini_client import GeminiClientError, create_client
 from src.media_utils import data_url_for_displayable_image, validate_query_image
+from src.metadata import (
+    build_common_metadata,
+    build_metadata_from_editor_rows,
+    build_simple_metadata_filter,
+    merge_metadata,
+    metadata_filter_value,
+    parse_metadata_lines,
+)
 from src.model_manager import ModelInfo, ModelManager, ModelManagerError, default_model_from
 from src.qa_engine import ANSWER_STYLE_INSTRUCTIONS, DEFAULT_ANSWER_STYLE, QAEngine, QueryImage
 from src.source_registry import SourceRecord, SourceRegistry, source_id_from_custom_metadata
@@ -48,7 +56,7 @@ def main() -> None:
     st.caption("Local Streamlit app using Google-managed File Search stores for retrieval.")
 
     config = load_config()
-    is_admin = render_admin_controls()
+    is_admin = current_admin_status()
     api_key = render_api_key_controls(
         config.api_key,
         api_key_source=config.api_key_source,
@@ -59,7 +67,12 @@ def main() -> None:
     model = render_model_controls(approved_models)
 
     if not api_key:
-        st.info("Admin login is required to connect a Gemini API key before users can ask questions.")
+        st.subheader("Ask")
+        st.info(
+            "Connect a Gemini API key in the sidebar to start asking. Admin login is only "
+            "needed to save a server key or manage stores, uploads, and documents."
+        )
+        render_admin_controls()
         return
 
     try:
@@ -96,6 +109,7 @@ def main() -> None:
             selected_store_name=selected_store_name,
             api_key=api_key,
         )
+    render_admin_controls()
 
 
 def render_api_key_controls(
@@ -130,21 +144,19 @@ def render_api_key_controls(
     if session_api_key:
         st.sidebar.text_input("Gemini API key", value=mask_secret(session_api_key), disabled=True)
         st.sidebar.success("Connected for this browser session")
-        if is_admin and st.sidebar.button("Change API key"):
+        change_label = "Change API key" if is_admin else "Change session API key"
+        if st.sidebar.button(change_label):
             st.session_state.session_api_key = None
             cached_client.clear()
             st.rerun()
-        elif not is_admin:
-            st.sidebar.caption("Admin login is required to change the API key.")
         return session_api_key
 
-    if not is_admin:
-        st.sidebar.warning("Admin login required to connect API key.")
-        return None
-
     entered = st.sidebar.text_input("Gemini API key", type="password")
-    remember_key = st.sidebar.checkbox("Remember API key on this server", value=True)
-    if st.sidebar.button("Connect API key", disabled=not entered):
+    remember_key = False
+    if is_admin:
+        remember_key = st.sidebar.checkbox("Remember API key on this server", value=True)
+    connect_label = "Connect API key" if is_admin else "Connect for this session"
+    if st.sidebar.button(connect_label, disabled=not entered):
         if remember_key:
             try:
                 save_persisted_api_key(entered)
@@ -154,6 +166,8 @@ def render_api_key_controls(
         st.session_state.session_api_key = entered.strip()
         cached_client.clear()
         st.rerun()
+    if not is_admin:
+        st.sidebar.caption("This key is used only for your browser session. Admin login is required to save a shared server key.")
     return None
 
 
@@ -171,10 +185,15 @@ def render_model_controls(approved_models: dict[str, str]) -> str:
     return selected
 
 
-def render_admin_controls() -> bool:
-    st.sidebar.header("Admin")
+def current_admin_status() -> bool:
     if "is_admin" not in st.session_state:
         st.session_state.is_admin = False
+    return bool(st.session_state.is_admin)
+
+
+def render_admin_controls() -> bool:
+    st.sidebar.header("Admin")
+    current_admin_status()
 
     if st.session_state.is_admin:
         st.sidebar.success("Admin access enabled")
@@ -383,8 +402,12 @@ def render_upload_tab(
     )
     wait_for_import = st.checkbox("Wait for import/indexing operation to finish", value=True)
     poll_interval = st.number_input("Poll interval seconds", min_value=1, max_value=30, value=5)
+    upload_metadata, metadata_errors = render_upload_metadata_controls()
+    if metadata_errors:
+        for error in metadata_errors:
+            st.error(error)
 
-    if st.button("Upload to selected store", disabled=not uploaded_files):
+    if st.button("Upload to selected store", disabled=not uploaded_files or bool(metadata_errors)):
         for uploaded_file in uploaded_files:
             data = uploaded_file.getvalue()
             validation = validate_file(
@@ -407,14 +430,19 @@ def render_upload_tab(
                         data=data,
                         mime_type=validation.mime_type or "application/octet-stream",
                         file_search_store_name=selected_store_name,
+                        custom_metadata=upload_metadata,
                     )
+                    file_metadata = source_record.to_file_search_metadata()
+                    metadata_result = merge_metadata(file_metadata)
+                    if metadata_result.errors:
+                        raise ValueError("; ".join(metadata_result.errors))
                     result = upload_manager.upload_file_bytes(
                         file_search_store_name=selected_store_name,
                         filename=uploaded_file.name,
                         data=data,
                         content_type=validation.mime_type,
                         display_name=safe_display_name(uploaded_file.name),
-                        custom_metadata=source_record.to_file_search_metadata(),
+                        custom_metadata=metadata_result.items,
                         wait=wait_for_import,
                         poll_interval=float(poll_interval),
                     )
@@ -425,6 +453,65 @@ def render_upload_tab(
                     if source_record:
                         source_registry.delete_source(source_record.source_id)
                     st.error(f"{uploaded_file.name}: {exc}")
+
+
+def render_upload_metadata_controls() -> tuple[list[dict[str, Any]], list[str]]:
+    with st.expander("File Search metadata", expanded=False):
+        st.caption(
+            "Custom metadata is stored with each File Search document and can be used later "
+            "with metadata filters. Google allows up to 20 metadata entries per document; "
+            "this app reserves 3 for source archive linking."
+        )
+        col1, col2 = st.columns(2)
+        with col1:
+            document_title = st.text_input("Document title metadata", key="metadata_document_title")
+            document_type = st.text_input("Document type", placeholder="policy, manual, diagram", key="metadata_document_type")
+            department = st.text_input("Department", placeholder="Operations", key="metadata_department")
+        with col2:
+            project = st.text_input("Project", placeholder="ancoraDocs", key="metadata_project")
+            owner = st.text_input("Owner/author", placeholder="Team or person", key="metadata_owner")
+            version = st.text_input("Version", placeholder="1.0", key="metadata_version")
+
+        source_url = st.text_input("Source URL or reference", key="metadata_source_url")
+        rows = st.data_editor(
+            [{"key": "", "value": "", "type": "String"}],
+            key="metadata_editor_rows",
+            num_rows="dynamic",
+            use_container_width=True,
+            column_config={
+                "key": st.column_config.TextColumn("Key"),
+                "value": st.column_config.TextColumn("Value"),
+                "type": st.column_config.SelectboxColumn("Type", options=["String", "Number"]),
+            },
+        )
+        advanced_lines = st.text_area(
+            "Advanced metadata lines",
+            placeholder='author="Robert Graves"\nyear=1934\ntags=[policy, onboarding]',
+            help="Use key=value, one item per line. Quote values that should stay strings.",
+        )
+
+        common = build_common_metadata(
+            {
+                "document_title": document_title,
+                "document_type": document_type,
+                "department": department,
+                "project": project,
+                "owner": owner,
+                "version": version,
+                "source_url": source_url,
+            }
+        )
+        editor = build_metadata_from_editor_rows(rows)
+        advanced = parse_metadata_lines(advanced_lines)
+        merged = merge_metadata(common.items, editor.items, advanced.items, max_items=17)
+        errors = [*common.errors, *editor.errors, *advanced.errors, *merged.errors]
+
+        if merged.items:
+            st.caption("Metadata to attach to each uploaded file:")
+            st.dataframe(merged.items, width="stretch")
+        else:
+            st.caption("No additional metadata will be attached beyond the app's source archive metadata.")
+        return merged.items, errors
 
 
 def render_ask_tab(
@@ -456,8 +543,21 @@ def render_ask_tab(
             value=False,
             help="Uses Google Search grounding instead of the selected File Search store. Use this only for generic or current web questions, not knowledge-base questions.",
         )
-        metadata_filter = st.text_input("Optional metadata filter", placeholder='author="Robert Graves"')
-        top_k = st.number_input("Optional top_k", min_value=0, max_value=50, value=0)
+        filter_key, filter_operator, filter_value, filter_value_type, advanced_metadata_filter = (
+            render_metadata_filter_controls()
+        )
+        top_k = st.number_input(
+            "Optional top_k",
+            min_value=0,
+            max_value=50,
+            value=0,
+            help="Limits how many File Search chunks Google can retrieve before answering. Leave 0 for Google's default behavior.",
+        )
+        reverify_answer = st.checkbox(
+            "Review answer with a second File Search pass",
+            value=True,
+            help="Runs an extra File Search-grounded review call that checks the initial answer against the same selected store and corrects unsupported points.",
+        )
         include_media_previews = st.checkbox(
             "Show image citation previews in hover cards",
             value=True,
@@ -473,6 +573,19 @@ def render_ask_tab(
         if not use_web and not selected_store_name:
             st.error("Select or create a File Search store, or enable web answers for a generic web question.")
             return
+        metadata_filter = None
+        if not use_web:
+            filter_result = build_simple_metadata_filter(
+                filter_key,
+                filter_operator,
+                filter_value,
+                filter_value_type,
+                advanced_metadata_filter,
+            )
+            if filter_result.errors:
+                st.error("; ".join(filter_result.errors))
+                return
+            metadata_filter = metadata_filter_value(filter_result)
 
         with st.spinner("Querying File Search"):
             try:
@@ -497,8 +610,31 @@ def render_ask_tab(
                 st.error(str(exc))
                 return
 
+        initial_result = None
+        if reverify_answer and not use_web:
+            initial_result = result
+            with st.spinner("Reviewing answer against the selected File Search store"):
+                try:
+                    result = qa_engine.reverify_answer(
+                        question=question,
+                        draft_answer=initial_result.text,
+                        model=model,
+                        file_search_store_name=selected_store_name or "",
+                        metadata_filter=metadata_filter,
+                        top_k=int(top_k) if top_k else None,
+                        query_images=query_images,
+                        answer_style=answer_style,
+                    )
+                except (ValueError, GeminiAPIError) as exc:
+                    st.warning(f"Review pass failed; showing the initial answer. {exc}")
+                    result = initial_result
+
         st.markdown("### Answer")
         st.caption("Source mode: Google Search grounding" if use_web else "Source mode: selected File Search store")
+        if metadata_filter:
+            st.caption(f"Metadata filter: `{metadata_filter}`")
+        if initial_result:
+            st.caption("Review pass: second File Search reanalysis was enabled.")
         if query_images:
             st.caption(f"Used {len(query_images)} uploaded image(s) as question context.")
         media_data_urls = {}
@@ -534,12 +670,43 @@ def render_ask_tab(
             )
         else:
             st.markdown("_No text returned._")
+        if initial_result:
+            with st.expander("Initial answer before review"):
+                st.markdown(initial_result.text or "_No text returned._")
+                st.json(initial_result.grounding.raw_grounding_metadata or {})
         render_citations(file_search, source_registry, result.grounding.citations, is_admin)
         render_search_entry_point(result.raw_response)
         with st.expander("Raw grounding metadata"):
             st.json(result.grounding.raw_grounding_metadata or {})
         with st.expander("Raw response"):
             st.json(to_plain_data(result.raw_response))
+
+
+def render_metadata_filter_controls() -> tuple[str, str, str, str, str]:
+    with st.expander("File Search metadata filter", expanded=False):
+        st.caption(
+            "Use this to narrow retrieval to documents uploaded with matching metadata. "
+            "The advanced box accepts Google's metadata_filter syntax."
+        )
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            filter_key = st.text_input("Filter key", placeholder="department")
+            filter_value = st.text_input("Filter value", placeholder="Operations")
+        with col2:
+            filter_operator = st.selectbox("Operator", ["=", "!=", "<", ">", "<=", ">="])
+            filter_value_type = st.selectbox("Value type", ["String", "Number"])
+        advanced_metadata_filter = st.text_input(
+            "Advanced metadata_filter",
+            placeholder='author = "Robert Graves"',
+            help="If this is filled in, it overrides the simple key/value builder.",
+        )
+    return (
+        filter_key,
+        filter_operator,
+        filter_value,
+        filter_value_type,
+        advanced_metadata_filter,
+    )
 
 
 def build_query_images(uploaded_files: list[Any]) -> list[QueryImage] | None:
@@ -703,6 +870,7 @@ def render_source_archive(
                 "size_bytes": record.size_bytes,
                 "sha256": record.sha256,
                 "created_at": record.created_at,
+                "custom_metadata": record.custom_metadata or [],
             }
             for record in records
         ],

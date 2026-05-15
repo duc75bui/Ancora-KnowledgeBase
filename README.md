@@ -1,14 +1,15 @@
-# ancoraDocs KnowledgeBase v2.00
+# ancoraDocs KnowledgeBase v2.10
 
 This is a basic local Streamlit app for Retrieval Augmented Generation with the Google Gemini File Search API. It uses Google File Search stores as the source of truth: Google imports files, chunks them, creates embeddings, indexes content, retrieves relevant chunks, returns grounding metadata, and manages File Search documents.
 
-The app does not implement a custom RAG pipeline. It does not use SQLite, local vector databases, LangChain, LlamaIndex, FAISS, Chroma, Pinecone, Google Search grounding, URL Context, or browser search.
+The app does not implement a custom RAG pipeline. It does not use SQLite, local vector databases, LangChain, LlamaIndex, FAISS, Chroma, Pinecone, URL Context, or browser search. Knowledge-base answers use File Search only; the optional web-answer mode is a separate Google Search grounding flow for generic web questions.
 
 ## Sources Used
 
 - Google Gemini File Search guide: https://ai.google.dev/gemini-api/docs/file-search
 - File Search stores API reference: https://ai.google.dev/api/file-search/file-search-stores
 - File Search documents API reference: https://ai.google.dev/api/file-search/documents
+- Google AIP-160 filter syntax: https://google.aip.dev/160
 - Google Gen AI Python SDK docs: https://googleapis.github.io/python-genai/
 
 ## Setup
@@ -35,7 +36,7 @@ GEMINI_API_KEY=your-gemini-api-key
 ADMIN_PASSWORD=admin123
 ```
 
-You can also leave `.env` unset and have an admin connect the key in the Streamlit sidebar. By default, the app saves that key locally in `.app_config/secrets.json` so it survives app/browser restarts. The app never hardcodes or prints the full API key.
+You can also leave `.env` unset and connect a key in the Streamlit sidebar. Regular users can connect a temporary browser-session key to ask questions. Admins can choose to save a shared server key locally in `.app_config/secrets.json` so it survives app/browser restarts. The app never hardcodes or prints the full API key.
 
 `ADMIN_PASSWORD` controls access to locally archived original files. The default `admin123` is only for local testing.
 
@@ -62,7 +63,8 @@ Fix it by creating or selecting a Gemini API key in Google AI Studio, or by edit
 ## What The App Does
 
 - Loads `GEMINI_API_KEY` from `.env` or accepts a key in the UI.
-- Admin users can connect or change the Gemini API key when it is not loaded from `.env`; connected keys are masked and disabled in the sidebar.
+- Regular users can connect a temporary browser-session Gemini API key and start asking without admin login when no server key is configured.
+- Admin users can save or change the shared server Gemini API key when it is not loaded from `.env`; connected keys are masked and disabled in the sidebar.
 - Lets users choose a File Search-supported Gemini model.
 - Admins can refresh Gemini models from the Models API and approve additional model IDs for the picker.
 - Lets users choose the File Search store to ask against.
@@ -72,12 +74,15 @@ Fix it by creating or selecting a Gemini API key in Google AI Studio, or by edit
 - Admin users can list, create, select, and delete Google Gemini File Search stores.
 - Creates stores with `models/gemini-embedding-2` so text and PNG/JPEG images can be used for multimodal File Search.
 - Admin users can upload files directly into the selected File Search store with `upload_to_file_search_store`.
+- Admin users can attach File Search custom metadata during upload with common fields, an editable key/value table, and advanced `key=value` lines.
 - Lets the SDK/API infer upload MIME type from the file path, matching Google's direct-upload example. The app still validates MIME locally for user feedback and source archive metadata.
 - Archives a local copy of newly uploaded original files under `.source_files/` for admin-only viewing.
-- Attaches `source_id`, `source_filename`, and `source_sha256` as File Search custom metadata during upload.
+- Attaches `source_id`, `source_filename`, and `source_sha256` as File Search custom metadata during upload, along with admin-provided metadata.
 - Admin users can view long-running upload/import operation output.
 - Admin users can list and delete File Search documents in a selected store.
 - Asks questions with only the File Search tool attached to `generate_content`.
+- Lets users narrow File Search retrieval with a visual metadata filter builder or an advanced `metadata_filter` expression.
+- Can run a second File Search-only review pass that re-analyzes the question and initial answer against the same selected store before showing the final answer.
 - When web-answer mode is enabled, asks with Google Search grounding instead of File Search.
 - Lets the user attach optional query-context images in the Ask tab using Gemini inline image input. Supported image input formats are PNG, JPEG, WebP, HEIC, and HEIF.
 - Displays answers, citations, page numbers, media IDs, custom metadata, grounding supports, and raw grounding metadata when returned.
@@ -128,6 +133,29 @@ Google still enforces the final server-side MIME support. Audio and video format
 
 According to the official guide, raw `File` objects uploaded through the File API are temporary and deleted after 48 hours. The imported data in a File Search store persists until manually deleted or until the model is deprecated. This app treats File Search stores and documents as the durable source of truth.
 
+## File Search Metadata
+
+Google File Search supports up to 20 custom metadata entries per document. This app reserves 3 entries for local source archive linking and lets admins add up to 17 more entries during upload.
+
+The app limits metadata keys to filter-safe identifiers: start with a letter, then use letters, numbers, or underscores.
+
+Useful metadata examples:
+
+- `document_type = "policy"`
+- `department = "Operations"`
+- `project = "ancoraDocs"`
+- `year = 2026`
+- `tags = [connector, deployment]`
+
+In Ask, use the simple metadata filter builder for one key/value comparison, or use the advanced `metadata_filter` field for Google's AIP-160-style syntax such as:
+
+```text
+department = "Operations"
+year >= 2026
+```
+
+Metadata filtering narrows what File Search retrieves from the selected store. It does not create local embeddings or replace Google's managed retrieval.
+
 ## Limits And Current Limitations
 
 - Maximum file size per document is 100 MB.
@@ -137,7 +165,8 @@ According to the official guide, raw `File` objects uploaded through the File AP
 - Store size limits depend on account tier; Google recommends keeping each store under 20 GB for retrieval latency.
 - This app uses Google-managed default chunking. It does not expose custom chunk sizes yet.
 - The local MIME allowlist covers common official types rather than every MIME type listed in the guide.
-- Metadata filters are exposed as an advanced text box, but the app does not yet provide a visual metadata builder.
+- The metadata filter builder creates one simple comparison. Use the advanced field for compound filters; Google validates unsupported filter syntax at API time.
+- The review pass is a second File Search query. It improves answer checking but adds latency and token cost, and it can only verify against content Google retrieves from the selected store.
 - The model detail page for `gemini-2.5-flash` says File Search is supported, but the File Search guide's supported model table does not include it, so this app keeps the initial dropdown aligned to the File Search guide table.
 - Original-file viewing is only available for local files uploaded through this app after source archiving was added.
 - PDF previews are embedded as browser data URLs; large PDFs may be better downloaded than previewed inline.
