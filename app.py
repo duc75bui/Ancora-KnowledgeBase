@@ -497,10 +497,18 @@ def render_upload_tab(
                     st.caption(f"Local source archive id: {source_record.source_id}")
                     st.json(to_plain_data(result.final_operation or result.operation))
                 except OperationTimeoutError as exc:
+                    elapsed_seconds = exc.elapsed_seconds or 0
+                    timeout_seconds = exc.timeout_seconds or float(operation_timeout_minutes) * 60
                     st.warning(
                         f"{uploaded_file.name}: Google File Search is still importing this file. "
                         "The app stopped waiting before the operation completed, but the operation "
                         "may continue in Google in the background."
+                    )
+                    st.caption(
+                        "Import wait diagnostics: "
+                        f"configured timeout {timeout_seconds / 60:.1f} minute(s), "
+                        f"elapsed wait {elapsed_seconds / 60:.1f} minute(s), "
+                        f"poll interval {float(poll_interval):.1f} second(s)."
                     )
                     st.caption(f"Local source archive id kept: {source_record.source_id}")
                     timeout_payload = {

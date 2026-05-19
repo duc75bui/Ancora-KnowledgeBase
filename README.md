@@ -1,4 +1,4 @@
-# ancoraDocs KnowledgeBase v2.22
+# ancoraDocs KnowledgeBase v2.23
 
 This is a basic local Streamlit app for Retrieval Augmented Generation with the Google Gemini File Search API. It uses Google File Search stores as the source of truth: Google imports files, chunks them, creates embeddings, indexes content, retrieves relevant chunks, returns grounding metadata, and manages File Search documents.
 
@@ -74,7 +74,7 @@ Fix it by creating or selecting a Gemini API key in Google AI Studio, or by edit
 - Admin users can list, create, select, and delete Google Gemini File Search stores.
 - Creates stores with `models/gemini-embedding-2` so text and PNG/JPEG images can be used for multimodal File Search.
 - Admin users can upload files directly into the selected File Search store with `upload_to_file_search_store`.
-- Admin users can set how long the app waits for Google's import/indexing operation. If the wait times out, the app keeps the local source archive, shows the pending operation metadata, and stops the remaining batch so the admin can check status later.
+- Admin users can set how long the app waits for Google's import/indexing operation. If the wait times out, the app keeps the local source archive, shows wait diagnostics plus pending operation metadata, and stops the remaining batch so the admin can check status later.
 - Admin users can attach File Search custom metadata during upload with common fields, an editable key/value table, and advanced `key=value` lines.
 - Lets the SDK/API infer upload MIME type from the file path, matching Google's direct-upload example. The app still validates MIME locally for user feedback and source archive metadata.
 - Archives a local copy of every newly uploaded original file under `.source_files/uploads/` for admin source management and citation source viewing.

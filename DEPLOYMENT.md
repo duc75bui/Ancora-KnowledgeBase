@@ -1,4 +1,4 @@
-# ancoraDocs KnowledgeBase v2.22 Deployment Guide
+# ancoraDocs KnowledgeBase v2.23 Deployment Guide
 
 This guide is for deploying the local Streamlit app on a Windows server or internal workstation.
 
@@ -258,7 +258,7 @@ Upload succeeds but citations do not show image thumbnails:
 Upload shows `File Search operation timed out before completion`:
 
 - This means the app stopped polling before Google finished importing/indexing the file; it does not prove the Google operation failed.
-- The app keeps the local source archive and shows the pending operation metadata.
+- The app keeps the local source archive and shows wait diagnostics plus the pending operation metadata.
 - Use Documents > List documents later to verify whether the import completed, or rerun Upload with a longer import wait timeout.
 - The app stops the remaining selected uploads after a timeout so the admin can decide whether to wait, check status, or retry.
 

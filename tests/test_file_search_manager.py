@@ -122,3 +122,5 @@ def test_wait_for_operation_timeout_includes_pending_operation():
     assert exc.value.status.name == "operations/upload-1"
     assert exc.value.status.done is False
     assert exc.value.status.metadata == {"progress": "indexing"}
+    assert exc.value.timeout_seconds == 0
+    assert exc.value.elapsed_seconds is not None
