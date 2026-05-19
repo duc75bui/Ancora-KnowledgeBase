@@ -4,6 +4,8 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable
 
+from google.genai import types
+
 from .citation_parser import to_plain_data
 from .config import FILE_SEARCH_EMBEDDING_MODEL, format_api_error
 
@@ -117,6 +119,10 @@ class FileSearchManager:
     def download_media(self, media_id: str) -> bytes:
         return self._call(self.client.file_search_stores.download_media, media_id=media_id)
 
+    def get_operation(self, operation_name: str, operation_kind: str = "import_file") -> Any:
+        operation = operation_from_name(operation_name, operation_kind)
+        return self._call(self.client.operations.get, operation)
+
     def wait_for_operation(
         self,
         operation: Any,
@@ -166,6 +172,12 @@ def operation_status(operation: Any) -> OperationStatus:
         response=_get(operation, "response"),
         metadata=_get(operation, "metadata"),
     )
+
+
+def operation_from_name(operation_name: str, operation_kind: str = "import_file") -> Any:
+    if operation_kind == "upload_to_file_search_store":
+        return types.UploadToFileSearchStoreOperation(name=operation_name)
+    return types.ImportFileOperation(name=operation_name)
 
 
 def object_name(value: Any) -> str | None:

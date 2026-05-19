@@ -17,6 +17,9 @@ class UploadResult:
     mime_type: str
     operation: Any
     final_operation: Any | None = None
+    upload_strategy: str = "direct"
+    operation_kind: str = "upload_to_file_search_store"
+    file_name: str | None = None
 
 
 class UploadManager:
@@ -49,32 +52,23 @@ class UploadManager:
         wait: bool = True,
         poll_interval: float = 5.0,
         timeout_seconds: float = 600.0,
+        upload_strategy: str = "files_api_import",
     ) -> UploadResult:
         validation = validate_file(filename, len(data), content_type, data=data)
         if not validation.is_valid:
             raise ValueError("; ".join(validation.errors))
 
         file_path = self.save_bytes(filename, data)
-        operation = self.upload_file_path(
+        return self.upload_file_path(
             file_search_store_name=file_search_store_name,
             file_path=file_path,
             mime_type=validation.mime_type,
             display_name=display_name or safe_display_name(filename),
             custom_metadata=custom_metadata,
-            wait=False,
-        ).operation
-        final_operation = None
-        if wait:
-            final_operation = self.file_search.wait_for_operation(
-                operation,
-                poll_interval=poll_interval,
-                timeout_seconds=timeout_seconds,
-            )
-        return UploadResult(
-            file_path=file_path,
-            mime_type=validation.mime_type or "application/octet-stream",
-            operation=operation,
-            final_operation=final_operation,
+            wait=wait,
+            poll_interval=poll_interval,
+            timeout_seconds=timeout_seconds,
+            upload_strategy=upload_strategy,
         )
 
     def upload_file_path(
@@ -87,6 +81,7 @@ class UploadManager:
         wait: bool = True,
         poll_interval: float = 5.0,
         timeout_seconds: float = 600.0,
+        upload_strategy: str = "files_api_import",
     ) -> UploadResult:
         path = Path(file_path)
         if not path.exists():
@@ -103,6 +98,37 @@ class UploadManager:
         if custom_metadata:
             config["custom_metadata"] = custom_metadata
 
+        if upload_strategy == "direct":
+            return self._upload_direct(
+                path=path,
+                file_search_store_name=file_search_store_name,
+                config=config,
+                mime_type=validation.mime_type or "application/octet-stream",
+                wait=wait,
+                poll_interval=poll_interval,
+                timeout_seconds=timeout_seconds,
+            )
+        return self._upload_via_files_api(
+            path=path,
+            file_search_store_name=file_search_store_name,
+            display_name=display_name or safe_display_name(path.name),
+            custom_metadata=custom_metadata,
+            mime_type=validation.mime_type or "application/octet-stream",
+            wait=wait,
+            poll_interval=poll_interval,
+            timeout_seconds=timeout_seconds,
+        )
+
+    def _upload_direct(
+        self,
+        path: Path,
+        file_search_store_name: str,
+        config: dict[str, Any],
+        mime_type: str,
+        wait: bool,
+        poll_interval: float,
+        timeout_seconds: float,
+    ) -> UploadResult:
         try:
             operation = self.client.file_search_stores.upload_to_file_search_store(
                 file_search_store_name=file_search_store_name,
@@ -118,9 +144,56 @@ class UploadManager:
                 )
             return UploadResult(
                 file_path=path,
-                mime_type=validation.mime_type or "application/octet-stream",
+                mime_type=mime_type,
                 operation=operation,
                 final_operation=final_operation,
+                upload_strategy="direct",
+                operation_kind="upload_to_file_search_store",
+            )
+        except GeminiAPIError:
+            raise
+        except Exception as exc:
+            raise GeminiAPIError(format_api_error(exc, self.secrets)) from None
+
+    def _upload_via_files_api(
+        self,
+        path: Path,
+        file_search_store_name: str,
+        display_name: str,
+        custom_metadata: list[dict[str, Any]] | None,
+        mime_type: str,
+        wait: bool,
+        poll_interval: float,
+        timeout_seconds: float,
+    ) -> UploadResult:
+        try:
+            file_obj = self.client.files.upload(
+                file=str(path),
+                config={"display_name": display_name},
+            )
+            config: dict[str, Any] = {}
+            if custom_metadata:
+                config["custom_metadata"] = custom_metadata
+            operation = self.client.file_search_stores.import_file(
+                file_search_store_name=file_search_store_name,
+                file_name=file_obj.name,
+                config=config or None,
+            )
+            final_operation = None
+            if wait:
+                final_operation = self.file_search.wait_for_operation(
+                    operation,
+                    poll_interval=poll_interval,
+                    timeout_seconds=timeout_seconds,
+                )
+            return UploadResult(
+                file_path=path,
+                mime_type=mime_type,
+                operation=operation,
+                final_operation=final_operation,
+                upload_strategy="files_api_import",
+                operation_kind="import_file",
+                file_name=file_obj.name,
             )
         except GeminiAPIError:
             raise

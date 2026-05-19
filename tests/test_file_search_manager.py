@@ -2,7 +2,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.file_search_manager import FileSearchManager, GeminiAPIError, OperationTimeoutError
+from src.file_search_manager import (
+    FileSearchManager,
+    GeminiAPIError,
+    OperationTimeoutError,
+    operation_from_name,
+)
 
 
 class FakeFileSearchStores:
@@ -124,3 +129,18 @@ def test_wait_for_operation_timeout_includes_pending_operation():
     assert exc.value.status.metadata == {"progress": "indexing"}
     assert exc.value.timeout_seconds == 0
     assert exc.value.elapsed_seconds is not None
+
+
+def test_get_operation_recreates_import_operation_by_name():
+    client = FakeClient()
+    manager = FileSearchManager(client)
+
+    operation = manager.get_operation("operations/import-1", "import_file")
+
+    assert operation.name == "operations/import-1"
+
+
+def test_operation_from_name_supports_direct_upload_operation_kind():
+    operation = operation_from_name("operations/upload-1", "upload_to_file_search_store")
+
+    assert operation.name == "operations/upload-1"

@@ -32,6 +32,7 @@ from src.file_search_manager import (
     object_to_dict,
     object_display_name,
     object_name,
+    operation_status,
 )
 from src.gemini_client import GeminiClientError, create_client
 from src.media_utils import data_url_for_displayable_image, validate_query_image
@@ -44,6 +45,7 @@ from src.metadata import (
     parse_metadata_lines,
 )
 from src.model_manager import ModelInfo, ModelManager, ModelManagerError, default_model_from
+from src.operation_registry import OperationRegistry, PendingOperationRecord
 from src.pdf_preview import PDFPreviewError, render_pdf_page_png
 from src.qa_engine import ANSWER_STYLE_INSTRUCTIONS, DEFAULT_ANSWER_STYLE, QAEngine, QueryImage
 from src.source_registry import (
@@ -111,6 +113,7 @@ def main() -> None:
     upload_manager = UploadManager(client, secrets=[api_key])
     qa_engine = QAEngine(client, secrets=[api_key])
     source_registry = SourceRegistry()
+    operation_registry = OperationRegistry()
 
     stores = load_stores(file_search)
     selected_store_name = render_store_selector(stores, is_admin=is_admin)
@@ -129,6 +132,7 @@ def main() -> None:
                 file_search=file_search,
                 upload_manager=upload_manager,
                 source_registry=source_registry,
+                operation_registry=operation_registry,
                 model_manager=model_manager,
                 approved_models=approved_models,
                 stores=stores,
@@ -285,6 +289,7 @@ def render_admin_panel(
     file_search: FileSearchManager,
     upload_manager: UploadManager,
     source_registry: SourceRegistry,
+    operation_registry: OperationRegistry,
     model_manager: ModelManager,
     approved_models: dict[str, str],
     stores: list[Any],
@@ -299,7 +304,13 @@ def render_admin_panel(
     with stores_tab:
         render_stores_tab(file_search, stores)
     with upload_tab:
-        render_upload_tab(upload_manager, source_registry, selected_store_name)
+        render_upload_tab(
+            file_search,
+            upload_manager,
+            source_registry,
+            operation_registry,
+            selected_store_name,
+        )
     with documents_tab:
         render_documents_tab(file_search, source_registry, selected_store_name, is_admin=True)
     with models_tab:
@@ -421,8 +432,10 @@ def render_stores_tab(file_search: FileSearchManager, stores: list[Any]) -> None
 
 
 def render_upload_tab(
+    file_search: FileSearchManager,
     upload_manager: UploadManager,
     source_registry: SourceRegistry,
+    operation_registry: OperationRegistry,
     selected_store_name: str | None,
 ) -> None:
     st.subheader("Upload documents or images")
@@ -435,6 +448,22 @@ def render_upload_tab(
         type=accepted_extensions(),
         accept_multiple_files=True,
         help="Google File Search handles import, chunking, embedding, indexing, and retrieval.",
+    )
+    upload_strategy_label = st.selectbox(
+        "Upload method",
+        [
+            "Files API upload then File Search import (recommended)",
+            "Direct upload to File Search store",
+        ],
+        help=(
+            "The two-step method first uploads through Google's standard Files API, then imports "
+            "that file into the File Search store. It is more reliable for larger or image-heavy files."
+        ),
+    )
+    upload_strategy = (
+        "direct"
+        if upload_strategy_label == "Direct upload to File Search store"
+        else "files_api_import"
     )
     wait_for_import = st.checkbox("Wait for import/indexing operation to finish", value=True)
     poll_interval = st.number_input("Poll interval seconds", min_value=1, max_value=30, value=5)
@@ -492,10 +521,20 @@ def render_upload_tab(
                         wait=wait_for_import,
                         poll_interval=float(poll_interval),
                         timeout_seconds=float(operation_timeout_minutes) * 60,
+                        upload_strategy=upload_strategy,
                     )
                     st.success(f"Uploaded {uploaded_file.name} as {result.mime_type}")
                     st.caption(f"Local source archive id: {source_record.source_id}")
                     st.json(to_plain_data(result.final_operation or result.operation))
+                    if not wait_for_import:
+                        save_pending_operation(
+                            operation_registry,
+                            result=result,
+                            filename=uploaded_file.name,
+                            selected_store_name=selected_store_name,
+                            source_record=source_record,
+                            status_label="Started import/indexing operation.",
+                        )
                 except OperationTimeoutError as exc:
                     elapsed_seconds = exc.elapsed_seconds or 0
                     timeout_seconds = exc.timeout_seconds or float(operation_timeout_minutes) * 60
@@ -516,6 +555,21 @@ def render_upload_tab(
                         "status": to_plain_data(exc.status),
                     }
                     st.json(timeout_payload)
+                    save_pending_operation(
+                        operation_registry,
+                        operation=exc.operation,
+                        operation_kind=(
+                            "upload_to_file_search_store"
+                            if upload_strategy == "direct"
+                            else "import_file"
+                        ),
+                        upload_strategy=upload_strategy,
+                        filename=uploaded_file.name,
+                        selected_store_name=selected_store_name,
+                        source_record=source_record,
+                        status=to_plain_data(exc.status),
+                        status_label="Saved pending import operation for later refresh.",
+                    )
                     st.info(
                         "The remaining selected files were not uploaded in this batch. "
                         "Use Documents > List documents later to check whether the pending import finished, "
@@ -526,6 +580,125 @@ def render_upload_tab(
                     if source_record:
                         source_registry.delete_source(source_record.source_id)
                     st.error(f"{uploaded_file.name}: {exc}")
+
+    render_pending_operations(file_search, operation_registry, selected_store_name)
+
+
+def save_pending_operation(
+    operation_registry: OperationRegistry,
+    filename: str,
+    selected_store_name: str,
+    source_record: SourceRecord,
+    result: Any | None = None,
+    operation: Any | None = None,
+    operation_kind: str | None = None,
+    upload_strategy: str | None = None,
+    status: dict[str, Any] | None = None,
+    status_label: str | None = None,
+) -> None:
+    operation = operation or getattr(result, "operation", None)
+    status_obj = operation_status(operation)
+    operation_name = status_obj.name
+    if not operation_name:
+        st.warning("Could not save pending operation because Google did not return an operation name.")
+        return
+    stored_status = status or to_plain_data(status_obj)
+    operation_registry.upsert(
+        operation_name=operation_name,
+        operation_kind=operation_kind or getattr(result, "operation_kind", "import_file"),
+        file_search_store_name=selected_store_name,
+        filename=filename,
+        source_id=source_record.source_id,
+        upload_strategy=upload_strategy or getattr(result, "upload_strategy", "files_api_import"),
+        file_name=getattr(result, "file_name", None),
+        status=stored_status,
+        done=bool(status_obj.done),
+    )
+    if status_label:
+        st.caption(status_label)
+
+
+def render_pending_operations(
+    file_search: FileSearchManager,
+    operation_registry: OperationRegistry,
+    selected_store_name: str,
+) -> None:
+    st.divider()
+    st.subheader("Pending import operations")
+    records = operation_registry.list_records(selected_store_name)
+    if not records:
+        st.caption("No saved pending import operations for this store.")
+        return
+
+    st.dataframe(
+        [
+            {
+                "filename": record.filename,
+                "operation": record.operation_name,
+                "kind": record.operation_kind,
+                "method": record.upload_strategy,
+                "done": record.done,
+                "updated_at": record.updated_at,
+                "source_id": record.source_id,
+            }
+            for record in records
+        ],
+        width="stretch",
+    )
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Refresh pending import statuses"):
+            for record in records:
+                refresh_pending_operation(file_search, operation_registry, record)
+    with col2:
+        if st.button("Clear completed import records"):
+            removed = operation_registry.clear_completed()
+            st.success(f"Cleared {removed} completed import record(s).")
+            st.rerun()
+
+    for record in records[:20]:
+        with st.expander(f"{record.filename} - {record.operation_name}"):
+            st.json(record.status or {})
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("Refresh this operation", key=f"refresh-{record.operation_name}"):
+                    refresh_pending_operation(file_search, operation_registry, record)
+            with col2:
+                if st.button("Forget this operation record", key=f"forget-{record.operation_name}"):
+                    operation_registry.delete(record.operation_name)
+                    st.rerun()
+
+
+def refresh_pending_operation(
+    file_search: FileSearchManager,
+    operation_registry: OperationRegistry,
+    record: PendingOperationRecord,
+) -> None:
+    try:
+        operation = file_search.get_operation(record.operation_name, record.operation_kind)
+    except GeminiAPIError as exc:
+        st.error(f"{record.filename}: could not refresh operation status. {exc}")
+        return
+
+    status = operation_status(operation)
+    operation_registry.upsert(
+        operation_name=record.operation_name,
+        operation_kind=record.operation_kind,
+        file_search_store_name=record.file_search_store_name,
+        filename=record.filename,
+        source_id=record.source_id,
+        upload_strategy=record.upload_strategy,
+        file_name=record.file_name,
+        status=to_plain_data(status),
+        done=status.done,
+    )
+    if status.error:
+        st.error(f"{record.filename}: import operation finished with an API error.")
+        st.json(to_plain_data(status.error))
+    elif status.done:
+        st.success(f"{record.filename}: import operation is complete.")
+    else:
+        st.info(f"{record.filename}: import operation is still running.")
 
 
 def render_upload_metadata_controls() -> tuple[list[dict[str, Any]], list[str]]:
