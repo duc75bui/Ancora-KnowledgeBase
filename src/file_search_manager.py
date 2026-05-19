@@ -13,7 +13,15 @@ class GeminiAPIError(RuntimeError):
 
 
 class OperationTimeoutError(GeminiAPIError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        operation: Any | None = None,
+        status: "OperationStatus | None" = None,
+    ):
+        super().__init__(message)
+        self.operation = operation
+        self.status = status
 
 
 @dataclass(frozen=True)
@@ -119,7 +127,11 @@ class FileSearchManager:
             if progress_callback:
                 progress_callback(operation_status(current))
             if time.monotonic() >= deadline:
-                raise OperationTimeoutError("File Search operation timed out before completion.")
+                raise OperationTimeoutError(
+                    "File Search operation timed out before completion.",
+                    operation=current,
+                    status=operation_status(current),
+                )
             time.sleep(poll_interval)
             current = self._call(self.client.operations.get, current)
 

@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.file_search_manager import FileSearchManager, GeminiAPIError
+from src.file_search_manager import FileSearchManager, GeminiAPIError, OperationTimeoutError
 
 
 class FakeFileSearchStores:
@@ -108,3 +108,17 @@ def test_api_errors_are_sanitized():
 
     assert secret not in str(exc.value)
     assert "test...3456" in str(exc.value)
+
+
+def test_wait_for_operation_timeout_includes_pending_operation():
+    client = FakeClient()
+    manager = FileSearchManager(client)
+    operation = SimpleNamespace(name="operations/upload-1", done=False, metadata={"progress": "indexing"})
+
+    with pytest.raises(OperationTimeoutError) as exc:
+        manager.wait_for_operation(operation, timeout_seconds=0)
+
+    assert exc.value.operation is operation
+    assert exc.value.status.name == "operations/upload-1"
+    assert exc.value.status.done is False
+    assert exc.value.status.metadata == {"progress": "indexing"}

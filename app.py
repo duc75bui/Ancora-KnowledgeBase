@@ -28,9 +28,10 @@ from src.config import (
 from src.file_search_manager import (
     FileSearchManager,
     GeminiAPIError,
+    OperationTimeoutError,
+    object_to_dict,
     object_display_name,
     object_name,
-    object_to_dict,
 )
 from src.gemini_client import GeminiClientError, create_client
 from src.media_utils import data_url_for_displayable_image, validate_query_image
@@ -437,6 +438,16 @@ def render_upload_tab(
     )
     wait_for_import = st.checkbox("Wait for import/indexing operation to finish", value=True)
     poll_interval = st.number_input("Poll interval seconds", min_value=1, max_value=30, value=5)
+    operation_timeout_minutes = st.number_input(
+        "Import wait timeout minutes",
+        min_value=1,
+        max_value=120,
+        value=30,
+        help=(
+            "How long this app waits for Google File Search to finish importing. "
+            "If it times out, the Google operation may still continue in the background."
+        ),
+    )
     upload_metadata, metadata_errors = render_upload_metadata_controls()
     if metadata_errors:
         for error in metadata_errors:
@@ -480,10 +491,29 @@ def render_upload_tab(
                         custom_metadata=metadata_result.items,
                         wait=wait_for_import,
                         poll_interval=float(poll_interval),
+                        timeout_seconds=float(operation_timeout_minutes) * 60,
                     )
                     st.success(f"Uploaded {uploaded_file.name} as {result.mime_type}")
                     st.caption(f"Local source archive id: {source_record.source_id}")
                     st.json(to_plain_data(result.final_operation or result.operation))
+                except OperationTimeoutError as exc:
+                    st.warning(
+                        f"{uploaded_file.name}: Google File Search is still importing this file. "
+                        "The app stopped waiting before the operation completed, but the operation "
+                        "may continue in Google in the background."
+                    )
+                    st.caption(f"Local source archive id kept: {source_record.source_id}")
+                    timeout_payload = {
+                        "operation": to_plain_data(exc.operation),
+                        "status": to_plain_data(exc.status),
+                    }
+                    st.json(timeout_payload)
+                    st.info(
+                        "The remaining selected files were not uploaded in this batch. "
+                        "Use Documents > List documents later to check whether the pending import finished, "
+                        "or rerun Upload with a longer import wait timeout."
+                    )
+                    break
                 except (ValueError, GeminiAPIError) as exc:
                     if source_record:
                         source_registry.delete_source(source_record.source_id)
