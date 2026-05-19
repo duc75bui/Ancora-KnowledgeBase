@@ -179,6 +179,42 @@ def test_render_answer_can_link_to_local_pdf_source_viewer():
     assert "target=" not in rendered.html
 
 
+def test_render_answer_maps_split_pdf_part_page_to_original_page():
+    grounding = GroundingResult(
+        citations=[
+            Citation(
+                title="manual-pages-0026-0050.pdf",
+                text="The procedure starts on the third part page.",
+                page_number=3,
+                custom_metadata=[
+                    {"key": "source_id", "string_value": "source-1"},
+                    {"key": "source_page_start", "numeric_value": 26},
+                    {"key": "source_page_end", "numeric_value": 50},
+                ],
+            )
+        ],
+        grounding_supports=[],
+        support_spans=[
+            GroundingSupportSpan(
+                start_index=0,
+                end_index=13,
+                text="The procedure",
+                citation_indices=[0],
+            )
+        ],
+        raw_grounding_metadata=None,
+    )
+
+    rendered = render_answer_with_hover(
+        "The procedure starts on the third part page.",
+        grounding,
+        source_view_links={"source-1": "?source_id=source-1&page=28"},
+    )
+
+    assert "manual-pages-0026-0050.pdf (page 28)" in rendered.html
+    assert "Show page 28 in source panel" in rendered.html
+
+
 def test_render_answer_explains_missing_image_preview():
     grounding = GroundingResult(
         citations=[Citation(title="diagram.png", text="The diagram shows the flow.")],

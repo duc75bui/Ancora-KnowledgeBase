@@ -98,12 +98,13 @@ def _tooltip_html(
             continue
         citation = citations[index]
         title = citation.title or citation.uri or citation.media_id or "Retrieved context"
+        display_page = _citation_display_page(citation)
         display_title = title
-        if citation.page_number is not None:
-            display_title = f"{title} (page {citation.page_number})"
+        if display_page is not None:
+            display_title = f"{title} (page {display_page})"
         meta_bits = []
-        if citation.page_number is not None:
-            meta_bits.append(f"page {citation.page_number}")
+        if display_page is not None:
+            meta_bits.append(f"page {display_page}")
         if citation.file_search_store:
             meta_bits.append(citation.file_search_store)
         snippet = _compact(citation.text or "")
@@ -193,8 +194,9 @@ def _source_view_link_html(citation: Citation, source_view_links: dict[str, str]
     if not link:
         return ""
     label = "Show PDF in source panel"
-    if citation.page_number is not None:
-        label = f"Show page {citation.page_number} in source panel"
+    display_page = _page_from_source_link(link) or _citation_display_page(citation)
+    if display_page is not None:
+        label = f"Show page {display_page} in source panel"
     return _source_view_form_html(link, label)
 
 
@@ -236,6 +238,54 @@ def _custom_metadata_string_value(
         value = item.get("string_value") or item.get("stringValue")
         if isinstance(value, str):
             return value
+    return None
+
+
+def _custom_metadata_number_value(
+    metadata: list[dict[str, object]] | None,
+    key: str,
+) -> float | None:
+    if not metadata:
+        return None
+    for item in metadata:
+        if item.get("key") != key:
+            continue
+        value = item.get("numeric_value")
+        if value is None:
+            value = item.get("numericValue")
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            try:
+                return float(value)
+            except ValueError:
+                return None
+    return None
+
+
+def _citation_display_page(citation: Citation) -> int | None:
+    if citation.page_number is None:
+        return None
+    page_start = _custom_metadata_number_value(citation.custom_metadata, "source_page_start")
+    page_end = _custom_metadata_number_value(citation.custom_metadata, "source_page_end")
+    if page_start is None:
+        return citation.page_number
+    page = int(page_start) + citation.page_number - 1
+    if page_end is not None:
+        page = min(page, int(page_end))
+    return max(1, page)
+
+
+def _page_from_source_link(link: str) -> int | None:
+    query = link[1:] if link.startswith("?") else link
+    for name, value in parse_qsl(query, keep_blank_values=True):
+        if name != "page":
+            continue
+        try:
+            page = int(value)
+        except ValueError:
+            return None
+        return page if page > 0 else None
     return None
 
 

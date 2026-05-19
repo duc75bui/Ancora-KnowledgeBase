@@ -1,4 +1,4 @@
-from src.source_registry import SourceRegistry, source_id_from_custom_metadata
+from src.source_registry import SourceRegistry, metadata_numeric_value, source_id_from_custom_metadata
 
 
 def test_source_registry_saves_metadata_and_file(tmp_path):
@@ -52,6 +52,11 @@ def test_source_registry_saves_non_pdf_files_in_shared_uploads_dir(tmp_path):
 
 def test_source_id_from_camel_case_metadata():
     assert source_id_from_custom_metadata([{"key": "source_id", "stringValue": "abc"}]) == "abc"
+
+
+def test_metadata_numeric_value_reads_snake_and_camel_case():
+    assert metadata_numeric_value([{"key": "page", "numeric_value": 4}], "page") == 4
+    assert metadata_numeric_value([{"key": "page", "numericValue": "5"}], "page") == 5
 
 
 def test_find_by_filename_matches_single_record_in_store(tmp_path):

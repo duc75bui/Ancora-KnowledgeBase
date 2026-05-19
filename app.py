@@ -37,6 +37,7 @@ from src.file_search_manager import (
 from src.gemini_client import GeminiClientError, create_client
 from src.media_utils import data_url_for_displayable_image, validate_query_image
 from src.metadata import (
+    MAX_FILE_SEARCH_CUSTOM_METADATA_ITEMS,
     build_common_metadata,
     build_metadata_from_editor_rows,
     build_simple_metadata_filter,
@@ -47,10 +48,12 @@ from src.metadata import (
 from src.model_manager import ModelInfo, ModelManager, ModelManagerError, default_model_from
 from src.operation_registry import OperationRegistry, PendingOperationRecord
 from src.pdf_preview import PDFPreviewError, render_pdf_page_png
+from src.pdf_splitter import PDFPart, PDFSplitError, split_pdf_bytes
 from src.qa_engine import ANSWER_STYLE_INSTRUCTIONS, DEFAULT_ANSWER_STYLE, QAEngine, QueryImage
 from src.source_registry import (
     SourceRecord,
     SourceRegistry,
+    metadata_numeric_value,
     metadata_string_value,
     source_id_from_custom_metadata,
 )
@@ -481,6 +484,22 @@ def render_upload_tab(
             "If it times out, the Google operation may still continue in the background."
         ),
     )
+    pdf_split_fallback = st.checkbox(
+        "If a PDF import gets repeated Google 500/503 errors, split it into page-range PDFs and retry",
+        value=True,
+        help=(
+            "This is an admin fallback for PDFs that Google rejects during File Search ingestion. "
+            "The app imports smaller PDF page ranges into the same File Search store and keeps "
+            "the original PDF as the local citation source."
+        ),
+    )
+    pdf_pages_per_part = st.number_input(
+        "PDF fallback pages per part",
+        min_value=5,
+        max_value=75,
+        value=25,
+        disabled=not pdf_split_fallback,
+    )
     upload_metadata, metadata_errors = render_upload_metadata_controls()
     if metadata_errors:
         for error in metadata_errors:
@@ -585,16 +604,47 @@ def render_upload_tab(
                     )
                     break
                 except UploadStageError as exc:
-                    if source_record:
-                        source_registry.delete_source(source_record.source_id)
-                    st.error(f"{uploaded_file.name}: {exc}")
-                    if exc.retryable:
-                        st.info(
-                            "Google returned a transient server-side error before the app received "
-                            "a usable File Search operation. No pending operation can be refreshed "
-                            "for this upload. Wait a few minutes, then retry this file; if it keeps "
-                            "failing, try the alternate upload method or split/export the document."
+                    fallback_started = False
+                    if (
+                        source_record
+                        and exc.retryable
+                        and pdf_split_fallback
+                        and validation.mime_type == "application/pdf"
+                    ):
+                        fallback_started = upload_pdf_split_fallback(
+                            upload_manager=upload_manager,
+                            operation_registry=operation_registry,
+                            source_record=source_record,
+                            filename=uploaded_file.name,
+                            data=data,
+                            selected_store_name=selected_store_name,
+                            wait_for_import=wait_for_import,
+                            poll_interval=float(poll_interval),
+                            timeout_seconds=float(operation_timeout_minutes) * 60,
+                            pages_per_part=int(pdf_pages_per_part),
                         )
+                    if source_record and not fallback_started:
+                        source_registry.delete_source(source_record.source_id)
+                    if fallback_started:
+                        st.caption(
+                            f"Original full-PDF import failed before Google returned an operation: {exc}"
+                        )
+                    else:
+                        st.error(f"{uploaded_file.name}: {exc}")
+                    if exc.retryable:
+                        if fallback_started:
+                            st.info(
+                                "The original upload attempt cannot be refreshed because Google did not "
+                                "return an operation name. The split fallback part imports are the active "
+                                "File Search documents for this PDF."
+                            )
+                        else:
+                            st.info(
+                                "Google returned a transient server-side error before the app received "
+                                "a usable File Search operation. No pending operation can be refreshed "
+                                "for the original upload attempt. Wait a few minutes, then retry this file; "
+                                "if it keeps failing, use the PDF split fallback or split/export the document."
+                            )
                         break
                 except (ValueError, GeminiAPIError) as exc:
                     if source_record:
@@ -602,6 +652,144 @@ def render_upload_tab(
                     st.error(f"{uploaded_file.name}: {exc}")
 
     render_pending_operations(file_search, operation_registry, selected_store_name)
+
+
+def upload_pdf_split_fallback(
+    upload_manager: UploadManager,
+    operation_registry: OperationRegistry,
+    source_record: SourceRecord,
+    filename: str,
+    data: bytes,
+    selected_store_name: str,
+    wait_for_import: bool,
+    poll_interval: float,
+    timeout_seconds: float,
+    pages_per_part: int,
+) -> bool:
+    st.warning(
+        "The original PDF failed during Google File Search ingestion. Trying the PDF split "
+        "fallback with smaller page-range PDFs."
+    )
+    try:
+        split_result = split_pdf_bytes(
+            data=data,
+            original_filename=filename,
+            output_root=upload_manager.upload_dir,
+            pages_per_part=pages_per_part,
+        )
+    except (ValueError, PDFSplitError) as exc:
+        st.error(f"PDF split fallback could not start: {exc}")
+        return False
+
+    st.caption(
+        f"Split {filename} into {len(split_result.parts)} part(s) from "
+        f"{split_result.original_page_count} original page(s)."
+    )
+    part_upload_strategy = "files_api_import"
+    started_count = 0
+    completed_count = 0
+    pending_count = 0
+
+    for part in split_result.parts:
+        part_metadata = pdf_part_file_search_metadata(source_record, part)
+        try:
+            with st.spinner(
+                f"Importing {part.filename} ({part.part_index}/{part.part_count})"
+            ):
+                result = upload_manager.upload_file_path(
+                    file_search_store_name=selected_store_name,
+                    file_path=part.file_path,
+                    mime_type="application/pdf",
+                    display_name=part.filename,
+                    custom_metadata=part_metadata,
+                    wait=wait_for_import,
+                    poll_interval=poll_interval,
+                    timeout_seconds=timeout_seconds,
+                    upload_strategy=part_upload_strategy,
+                )
+            started_count += 1
+            if result.final_operation is not None:
+                completed_count += 1
+            else:
+                pending_count += 1
+                save_pending_operation(
+                    operation_registry,
+                    result=result,
+                    filename=part.filename,
+                    selected_store_name=selected_store_name,
+                    source_record=source_record,
+                    status_label=f"Saved pending import operation for {part.filename}.",
+                )
+            st.success(
+                f"Imported PDF part {part.part_index}/{part.part_count}: "
+                f"pages {part.page_start}-{part.page_end}."
+            )
+        except OperationTimeoutError as exc:
+            started_count += 1
+            pending_count += 1
+            save_pending_operation(
+                operation_registry,
+                operation=exc.operation,
+                operation_kind=(
+                    "upload_to_file_search_store"
+                    if part_upload_strategy == "direct"
+                    else "import_file"
+                ),
+                upload_strategy=part_upload_strategy,
+                filename=part.filename,
+                selected_store_name=selected_store_name,
+                source_record=source_record,
+                status=to_plain_data(exc.status),
+                status_label=f"Saved pending import operation for {part.filename}.",
+            )
+            st.warning(
+                f"PDF split fallback started part {part.part_index}/{part.part_count}, "
+                "but Google was still importing it when the app stopped waiting. "
+                "The remaining parts were not uploaded."
+            )
+            break
+        except (ValueError, GeminiAPIError) as exc:
+            st.error(
+                f"PDF split fallback failed on part {part.part_index}/{part.part_count} "
+                f"({part.filename}): {exc}"
+            )
+            break
+
+    if started_count:
+        st.info(
+            f"PDF split fallback started {started_count} part import(s): "
+            f"{completed_count} completed while waiting, {pending_count} pending/not waited. "
+            "Citations from these parts map back to the original archived PDF when Google "
+            "returns the app metadata."
+        )
+        st.caption(f"Original local source archive id kept: {source_record.source_id}")
+        return True
+    return False
+
+
+def pdf_part_file_search_metadata(source_record: SourceRecord, part: PDFPart) -> list[dict[str, Any]]:
+    essential = [
+        {"key": "source_id", "string_value": source_record.source_id},
+        {"key": "source_filename", "string_value": source_record.original_filename},
+        {"key": "source_sha256", "string_value": source_record.sha256},
+        {"key": "source_upload_mode", "string_value": "pdf_split_fallback"},
+        {"key": "source_part_filename", "string_value": part.filename},
+        {"key": "source_page_start", "numeric_value": part.page_start},
+        {"key": "source_page_end", "numeric_value": part.page_end},
+        {"key": "source_part_index", "numeric_value": part.part_index},
+        {"key": "source_part_count", "numeric_value": part.part_count},
+    ]
+    metadata = list(essential)
+    seen = {str(item["key"]) for item in metadata}
+    for item in source_record.custom_metadata or []:
+        key = str(item.get("key", "") or "")
+        if not key or key in seen:
+            continue
+        metadata.append(item)
+        seen.add(key)
+        if len(metadata) >= MAX_FILE_SEARCH_CUSTOM_METADATA_ITEMS:
+            break
+    return metadata
 
 
 def save_pending_operation(
@@ -1337,7 +1525,7 @@ def render_citation_source_controls(
         source_registry=source_registry,
         record=record,
         key_prefix=key_prefix,
-        page_number=citation.page_number,
+        page_number=citation_original_page_number(citation),
     )
 
 
@@ -1530,16 +1718,19 @@ def citation_source_view_links(
         )
         if record is None or record.mime_type != "application/pdf":
             continue
+        page_number = citation_original_page_number(citation)
         params = {"source_id": record.source_id}
-        if citation.page_number:
-            params["page"] = str(citation.page_number)
+        if page_number:
+            params["page"] = str(page_number)
         if answer_id:
             params["answer_id"] = answer_id
         link = f"?{urlencode(params)}"
         links[citation_source_link_key("source_id", record.source_id, citation.page_number)] = link
+        links[citation_source_link_key("source_id", record.source_id, page_number)] = link
         links.setdefault(record.source_id, link)
         if citation.title:
             links[citation_source_link_key("title", citation.title, citation.page_number)] = link
+            links[citation_source_link_key("title", citation.title, page_number)] = link
             links.setdefault(citation.title, link)
     return links
 
@@ -1564,6 +1755,20 @@ def combined_source_citations(
     return combined
 
 
+def citation_original_page_number(citation: Citation) -> int | None:
+    if citation.page_number is None:
+        return None
+    page_start = metadata_numeric_value(citation.custom_metadata, "source_page_start")
+    page_end = metadata_numeric_value(citation.custom_metadata, "source_page_end")
+    if page_start is None:
+        return citation.page_number
+
+    original_page = int(page_start) + citation.page_number - 1
+    if page_end is not None:
+        original_page = min(original_page, int(page_end))
+    return max(1, original_page)
+
+
 def citation_source_view_targets(
     source_registry: SourceRegistry,
     citations: list[Citation],
@@ -1579,19 +1784,20 @@ def citation_source_view_targets(
         )
         if record is None or record.mime_type != "application/pdf":
             continue
-        key = (record.source_id, citation.page_number)
+        page_number = citation_original_page_number(citation)
+        key = (record.source_id, page_number)
         if key in seen:
             continue
         seen.add(key)
         title = citation.title or record.original_filename
-        if citation.page_number:
-            title = f"{title} - page {citation.page_number}"
+        if page_number:
+            title = f"{title} - page {page_number}"
         targets.append(
             {
                 "citation_index": index,
                 "source_id": record.source_id,
                 "title": title,
-                "page_number": citation.page_number,
+                "page_number": page_number,
             }
         )
     return targets

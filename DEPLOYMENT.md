@@ -1,4 +1,4 @@
-# ancoraDocs KnowledgeBase v2.25 Deployment Guide
+# ancoraDocs KnowledgeBase v2.26 Deployment Guide
 
 This guide is for deploying the local Streamlit app on a Windows server or internal workstation.
 
@@ -268,6 +268,7 @@ Upload shows `500 INTERNAL` or `503 SERVICE_UNAVAILABLE`:
 - These are Google server-side upload/import failures, not local validation failures.
 - The app retries transient upload/import failures before showing the error.
 - If Google returns the error before returning an operation name, there is no pending File Search operation for the app to refresh. Retry later, try the alternate upload method, or split/export the document if the same source keeps failing.
+- For PDFs, leave the PDF split fallback enabled. The app will split a failing PDF into smaller page-range PDFs, import those parts with Google File Search, and keep the original PDF for citation preview/page viewing.
 
 DOCX upload returns MIME type errors:
 

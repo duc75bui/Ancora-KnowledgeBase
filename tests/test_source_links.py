@@ -1,7 +1,14 @@
 from src.citation_parser import Citation
 from src.source_registry import SourceRegistry
 
-from app import citation_source_link_key, citation_source_view_links, citation_source_view_targets
+from app import (
+    citation_original_page_number,
+    citation_source_link_key,
+    citation_source_view_links,
+    citation_source_view_targets,
+    pdf_part_file_search_metadata,
+)
+from src.pdf_splitter import PDFPart
 
 
 def test_citation_source_view_links_match_archived_pdf_by_source_id(tmp_path):
@@ -114,3 +121,59 @@ def test_citation_source_view_targets_match_archived_pdf_by_title_stem(tmp_path)
             "page_number": 2,
         }
     ]
+
+
+def test_split_pdf_citation_links_map_part_page_to_original_page(tmp_path):
+    registry = SourceRegistry(tmp_path)
+    record = registry.save_source(
+        filename="Manual.pdf",
+        data=b"%PDF data",
+        mime_type="application/pdf",
+        file_search_store_name="fileSearchStores/store-1",
+    )
+    citation = Citation(
+        title="Manual-pages-0026-0050.pdf",
+        page_number=3,
+        custom_metadata=[
+            {"key": "source_id", "string_value": record.source_id},
+            {"key": "source_page_start", "numeric_value": 26},
+            {"key": "source_page_end", "numeric_value": 50},
+        ],
+    )
+
+    links = citation_source_view_links(registry, [citation], "fileSearchStores/store-1")
+    targets = citation_source_view_targets(registry, [citation], "fileSearchStores/store-1")
+
+    assert citation_original_page_number(citation) == 28
+    assert links[citation_source_link_key("source_id", record.source_id, 3)] == (
+        f"?source_id={record.source_id}&page=28"
+    )
+    assert targets[0]["page_number"] == 28
+
+
+def test_pdf_part_metadata_keeps_original_source_and_page_range(tmp_path):
+    registry = SourceRegistry(tmp_path)
+    record = registry.save_source(
+        filename="Manual.pdf",
+        data=b"%PDF data",
+        mime_type="application/pdf",
+        file_search_store_name="fileSearchStores/store-1",
+        custom_metadata=[{"key": "department", "string_value": "Support"}],
+    )
+    part = PDFPart(
+        file_path=tmp_path / "Manual-pages-0001-0025.pdf",
+        filename="Manual-pages-0001-0025.pdf",
+        page_start=1,
+        page_end=25,
+        page_count=25,
+        part_index=1,
+        part_count=3,
+    )
+
+    metadata = pdf_part_file_search_metadata(record, part)
+
+    assert {"key": "source_id", "string_value": record.source_id} in metadata
+    assert {"key": "source_filename", "string_value": "Manual.pdf"} in metadata
+    assert {"key": "source_page_start", "numeric_value": 1} in metadata
+    assert {"key": "source_page_end", "numeric_value": 25} in metadata
+    assert {"key": "department", "string_value": "Support"} in metadata

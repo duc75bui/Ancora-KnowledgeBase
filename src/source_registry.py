@@ -199,6 +199,25 @@ def metadata_string_value(metadata: list[dict[str, object]] | None, key: str) ->
     return None
 
 
+def metadata_numeric_value(metadata: list[dict[str, object]] | None, key: str) -> float | None:
+    if not metadata:
+        return None
+    for item in metadata:
+        if item.get("key") != key:
+            continue
+        value = item.get("numeric_value")
+        if value is None:
+            value = item.get("numericValue")
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str) and value.strip():
+            try:
+                return float(value)
+            except ValueError:
+                return None
+    return None
+
+
 def record_reference_values(record: SourceRecord) -> set[str]:
     values = _reference_variants(record.original_filename)
     for item in record.custom_metadata or []:
