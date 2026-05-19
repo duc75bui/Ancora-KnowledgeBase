@@ -54,7 +54,7 @@ from src.source_registry import (
     metadata_string_value,
     source_id_from_custom_metadata,
 )
-from src.upload_manager import UploadManager
+from src.upload_manager import UploadManager, UploadStageError
 from src.validation import accepted_extensions, safe_display_name, validate_file
 
 
@@ -465,6 +465,10 @@ def render_upload_tab(
         if upload_strategy_label == "Direct upload to File Search store"
         else "files_api_import"
     )
+    st.caption(
+        "Transient Google upload/import errors such as 500 or 503 are retried up to "
+        "3 times before the app reports the failed stage."
+    )
     wait_for_import = st.checkbox("Wait for import/indexing operation to finish", value=True)
     poll_interval = st.number_input("Poll interval seconds", min_value=1, max_value=30, value=5)
     operation_timeout_minutes = st.number_input(
@@ -524,6 +528,10 @@ def render_upload_tab(
                         upload_strategy=upload_strategy,
                     )
                     st.success(f"Uploaded {uploaded_file.name} as {result.mime_type}")
+                    st.caption(
+                        f"Upload method: {result.upload_strategy}; operation kind: "
+                        f"{result.operation_kind}; Google file: {result.file_name or 'not returned'}"
+                    )
                     st.caption(f"Local source archive id: {source_record.source_id}")
                     st.json(to_plain_data(result.final_operation or result.operation))
                     if not wait_for_import:
@@ -576,6 +584,18 @@ def render_upload_tab(
                         "or rerun Upload with a longer import wait timeout."
                     )
                     break
+                except UploadStageError as exc:
+                    if source_record:
+                        source_registry.delete_source(source_record.source_id)
+                    st.error(f"{uploaded_file.name}: {exc}")
+                    if exc.retryable:
+                        st.info(
+                            "Google returned a transient server-side error before the app received "
+                            "a usable File Search operation. No pending operation can be refreshed "
+                            "for this upload. Wait a few minutes, then retry this file; if it keeps "
+                            "failing, try the alternate upload method or split/export the document."
+                        )
+                        break
                 except (ValueError, GeminiAPIError) as exc:
                     if source_record:
                         source_registry.delete_source(source_record.source_id)

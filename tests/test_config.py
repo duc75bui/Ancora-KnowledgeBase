@@ -1,6 +1,7 @@
 from src.config import (
     clear_persisted_api_key,
     format_api_error,
+    is_transient_api_error,
     load_config,
     load_persisted_api_key,
     mask_secret,
@@ -72,3 +73,9 @@ def test_format_api_error_explains_service_blocked_key_restriction():
     assert "API key's API restrictions block Gemini File Search" in formatted
     assert "Generative Language API / Gemini API" in formatted
     assert "API_KEY_SERVICE_BLOCKED" in formatted
+
+
+def test_is_transient_api_error_detects_google_server_errors():
+    assert is_transient_api_error("500 INTERNAL. Internal error encountered.")
+    assert is_transient_api_error("503 Service Unavailable")
+    assert not is_transient_api_error("400 INVALID_ARGUMENT")

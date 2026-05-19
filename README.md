@@ -1,4 +1,4 @@
-# ancoraDocs KnowledgeBase v2.24
+# ancoraDocs KnowledgeBase v2.25
 
 This is a basic local Streamlit app for Retrieval Augmented Generation with the Google Gemini File Search API. It uses Google File Search stores as the source of truth: Google imports files, chunks them, creates embeddings, indexes content, retrieves relevant chunks, returns grounding metadata, and manages File Search documents.
 
@@ -75,6 +75,7 @@ Fix it by creating or selecting a Gemini API key in Google AI Studio, or by edit
 - Creates stores with `models/gemini-embedding-2` so text and PNG/JPEG images can be used for multimodal File Search.
 - Admin users can upload files with either the direct File Search upload method or the recommended two-step Files API upload plus File Search import method.
 - Admin users can set how long the app waits for Google's import/indexing operation. If the wait times out, the app keeps the local source archive, shows wait diagnostics plus pending operation metadata, and stops the remaining batch so the admin can check status later.
+- Transient Google upload/import failures such as `500 INTERNAL` and `503 SERVICE_UNAVAILABLE` are retried automatically and reported with the failed stage if Google still rejects the request.
 - Admin users can refresh saved pending import operation status from the Upload tab without re-uploading the document.
 - Admin users can attach File Search custom metadata during upload with common fields, an editable key/value table, and advanced `key=value` lines.
 - Lets the SDK/API infer upload MIME type from the file path, matching Google's direct-upload example. The app still validates MIME locally for user feedback and source archive metadata.
@@ -182,6 +183,7 @@ Metadata filtering narrows what File Search retrieves from the selected store. I
 - The review pass is a second File Search query. It improves answer checking but adds latency and token cost, and it can only verify against content Google retrieves from the selected store.
 - File Search import/indexing can take longer than the app's wait timeout. A timeout means the app stopped polling; it does not prove Google failed the operation. Use Documents > List documents later to verify completion.
 - For larger or image-heavy documents, use the default two-step upload method: upload through Google's standard Files API, then import that file into the selected File Search store.
+- If Google returns a `500 INTERNAL` or `503 SERVICE_UNAVAILABLE` before returning an operation name, the app cannot track it as pending. It retries those transient failures, then shows the failed stage so the admin knows whether the Files API upload, File Search import, or operation polling failed.
 - The model detail page for `gemini-2.5-flash` says File Search is supported, but the File Search guide's supported model table does not include it, so this app keeps the initial dropdown aligned to the File Search guide table.
 - Original-file viewing is only available for local files uploaded through this app after source archiving was added.
 - PDF previews render the cited page server-side with PyMuPDF and display it as an image in the source panel. Very large or complex pages may take longer to render.

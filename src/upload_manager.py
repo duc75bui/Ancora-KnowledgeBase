@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 import re
+import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
-from .config import TEMP_UPLOAD_DIR, format_api_error
-from .file_search_manager import FileSearchManager, GeminiAPIError
+from .config import TEMP_UPLOAD_DIR, format_api_error, is_transient_api_error
+from .file_search_manager import FileSearchManager, GeminiAPIError, OperationTimeoutError
 from .validation import safe_display_name, validate_file
+
+
+DEFAULT_TRANSIENT_RETRY_ATTEMPTS = 3
+DEFAULT_TRANSIENT_RETRY_DELAY_SECONDS = 2.0
 
 
 @dataclass(frozen=True)
@@ -22,16 +27,40 @@ class UploadResult:
     file_name: str | None = None
 
 
+class UploadStageError(GeminiAPIError):
+    def __init__(
+        self,
+        stage: str,
+        message: str,
+        attempts: int,
+        retryable: bool,
+    ):
+        retry_note = (
+            " Google returned a transient server-side error and the app exhausted "
+            "its retry attempts."
+            if retryable
+            else ""
+        )
+        super().__init__(f"{stage} failed after {attempts} attempt(s).{retry_note}\n\n{message}")
+        self.stage = stage
+        self.attempts = attempts
+        self.retryable = retryable
+
+
 class UploadManager:
     def __init__(
         self,
         client: Any,
         upload_dir: Path = TEMP_UPLOAD_DIR,
         secrets: Iterable[str | None] = (),
+        retry_attempts: int = DEFAULT_TRANSIENT_RETRY_ATTEMPTS,
+        retry_delay_seconds: float = DEFAULT_TRANSIENT_RETRY_DELAY_SECONDS,
     ):
         self.client = client
         self.upload_dir = upload_dir
         self.secrets = tuple(secrets)
+        self.retry_attempts = max(1, retry_attempts)
+        self.retry_delay_seconds = max(0.0, retry_delay_seconds)
         self.file_search = FileSearchManager(client, secrets=secrets)
 
     def save_bytes(self, filename: str, data: bytes) -> Path:
@@ -130,18 +159,30 @@ class UploadManager:
         timeout_seconds: float,
     ) -> UploadResult:
         try:
-            operation = self.client.file_search_stores.upload_to_file_search_store(
+            operation = self._call_with_transient_retries(
+                "Direct File Search upload",
+                self.client.file_search_stores.upload_to_file_search_store,
                 file_search_store_name=file_search_store_name,
                 file=str(path),
                 config=config,
             )
             final_operation = None
             if wait:
-                final_operation = self.file_search.wait_for_operation(
-                    operation,
-                    poll_interval=poll_interval,
-                    timeout_seconds=timeout_seconds,
-                )
+                try:
+                    final_operation = self.file_search.wait_for_operation(
+                        operation,
+                        poll_interval=poll_interval,
+                        timeout_seconds=timeout_seconds,
+                    )
+                except OperationTimeoutError:
+                    raise
+                except GeminiAPIError as exc:
+                    raise UploadStageError(
+                        "Direct File Search import status polling",
+                        str(exc),
+                        attempts=1,
+                        retryable=is_transient_api_error(exc),
+                    ) from None
             return UploadResult(
                 file_path=path,
                 mime_type=mime_type,
@@ -150,10 +191,17 @@ class UploadManager:
                 upload_strategy="direct",
                 operation_kind="upload_to_file_search_store",
             )
+        except UploadStageError:
+            raise
         except GeminiAPIError:
             raise
         except Exception as exc:
-            raise GeminiAPIError(format_api_error(exc, self.secrets)) from None
+            raise UploadStageError(
+                "Direct File Search upload",
+                format_api_error(exc, self.secrets),
+                attempts=1,
+                retryable=is_transient_api_error(exc),
+            ) from None
 
     def _upload_via_files_api(
         self,
@@ -166,26 +214,42 @@ class UploadManager:
         poll_interval: float,
         timeout_seconds: float,
     ) -> UploadResult:
+        file_name = None
         try:
-            file_obj = self.client.files.upload(
+            file_obj = self._call_with_transient_retries(
+                "Files API upload",
+                self.client.files.upload,
                 file=str(path),
                 config={"display_name": display_name},
             )
+            file_name = file_obj.name
             config: dict[str, Any] = {}
             if custom_metadata:
                 config["custom_metadata"] = custom_metadata
-            operation = self.client.file_search_stores.import_file(
+            operation = self._call_with_transient_retries(
+                "File Search import",
+                self.client.file_search_stores.import_file,
                 file_search_store_name=file_search_store_name,
-                file_name=file_obj.name,
+                file_name=file_name,
                 config=config or None,
             )
             final_operation = None
             if wait:
-                final_operation = self.file_search.wait_for_operation(
-                    operation,
-                    poll_interval=poll_interval,
-                    timeout_seconds=timeout_seconds,
-                )
+                try:
+                    final_operation = self.file_search.wait_for_operation(
+                        operation,
+                        poll_interval=poll_interval,
+                        timeout_seconds=timeout_seconds,
+                    )
+                except OperationTimeoutError:
+                    raise
+                except GeminiAPIError as exc:
+                    raise UploadStageError(
+                        "File Search import status polling",
+                        str(exc),
+                        attempts=1,
+                        retryable=is_transient_api_error(exc),
+                    ) from None
             return UploadResult(
                 file_path=path,
                 mime_type=mime_type,
@@ -193,12 +257,51 @@ class UploadManager:
                 final_operation=final_operation,
                 upload_strategy="files_api_import",
                 operation_kind="import_file",
-                file_name=file_obj.name,
+                file_name=file_name,
             )
+        except UploadStageError:
+            raise
         except GeminiAPIError:
             raise
         except Exception as exc:
-            raise GeminiAPIError(format_api_error(exc, self.secrets)) from None
+            stage = "File Search import" if file_name else "Files API upload"
+            raise UploadStageError(
+                stage,
+                format_api_error(exc, self.secrets),
+                attempts=1,
+                retryable=is_transient_api_error(exc),
+            ) from None
+
+    def _call_with_transient_retries(
+        self,
+        stage: str,
+        func: Any,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        last_error = ""
+        last_retryable = False
+        for attempt in range(1, self.retry_attempts + 1):
+            try:
+                return func(*args, **kwargs)
+            except Exception as exc:
+                last_error = format_api_error(exc, self.secrets)
+                last_retryable = is_transient_api_error(last_error)
+                if not last_retryable or attempt >= self.retry_attempts:
+                    raise UploadStageError(
+                        stage,
+                        last_error,
+                        attempts=attempt,
+                        retryable=last_retryable,
+                    ) from None
+                time.sleep(self.retry_delay_seconds * (2 ** (attempt - 1)))
+
+        raise UploadStageError(
+            stage,
+            last_error or "Unknown upload/import error.",
+            attempts=self.retry_attempts,
+            retryable=last_retryable,
+        )
 
 
 def _safe_filename(filename: str) -> str:

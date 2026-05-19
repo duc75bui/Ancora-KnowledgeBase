@@ -1,6 +1,8 @@
 from types import SimpleNamespace
 
-from src.upload_manager import UploadManager
+import pytest
+
+from src.upload_manager import UploadManager, UploadStageError
 
 
 class FakeStores:
@@ -31,6 +33,23 @@ class FakeClient:
         self.file_search_stores = FakeStores()
         self.files = FakeFiles()
         self.operations = SimpleNamespace(get=lambda operation: operation)
+
+
+class FlakyImportStores(FakeStores):
+    def __init__(self, failures_before_success: int):
+        super().__init__()
+        self.failures_before_success = failures_before_success
+        self.import_attempts = 0
+
+    def import_file(self, *, file_search_store_name, file_name, config=None):
+        self.import_attempts += 1
+        if self.import_attempts <= self.failures_before_success:
+            raise RuntimeError("500 INTERNAL. Internal error encountered.")
+        return super().import_file(
+            file_search_store_name=file_search_store_name,
+            file_name=file_name,
+            config=config,
+        )
 
 
 def test_upload_file_bytes_calls_google_upload_to_store(tmp_path):
@@ -83,3 +102,44 @@ def test_upload_file_bytes_can_use_files_api_then_import(tmp_path):
     assert result.upload_strategy == "files_api_import"
     assert result.operation_kind == "import_file"
     assert result.file_name == "files/file-1"
+
+
+def test_upload_file_bytes_retries_transient_import_errors(tmp_path):
+    client = FakeClient()
+    client.file_search_stores = FlakyImportStores(failures_before_success=1)
+    manager = UploadManager(client, upload_dir=tmp_path, retry_delay_seconds=0)
+
+    result = manager.upload_file_bytes(
+        file_search_store_name="fileSearchStores/store-1",
+        filename="manual.pdf",
+        data=b"%PDF data",
+        content_type="application/pdf",
+        wait=True,
+    )
+
+    assert client.file_search_stores.import_attempts == 2
+    assert result.operation.name == "operations/import-1"
+
+
+def test_upload_file_bytes_reports_stage_after_transient_retries_exhausted(tmp_path):
+    client = FakeClient()
+    client.file_search_stores = FlakyImportStores(failures_before_success=3)
+    manager = UploadManager(
+        client,
+        upload_dir=tmp_path,
+        retry_attempts=2,
+        retry_delay_seconds=0,
+    )
+
+    with pytest.raises(UploadStageError) as exc:
+        manager.upload_file_bytes(
+            file_search_store_name="fileSearchStores/store-1",
+            filename="manual.pdf",
+            data=b"%PDF data",
+            content_type="application/pdf",
+            wait=True,
+        )
+
+    assert exc.value.stage == "File Search import"
+    assert exc.value.retryable is True
+    assert exc.value.attempts == 2

@@ -115,6 +115,28 @@ def test_api_errors_are_sanitized():
     assert "test...3456" in str(exc.value)
 
 
+def test_file_search_calls_retry_transient_errors():
+    class FlakyStores(FakeFileSearchStores):
+        def __init__(self):
+            super().__init__()
+            self.list_attempts = 0
+
+        def list(self, *, config=None):
+            self.list_attempts += 1
+            if self.list_attempts == 1:
+                raise RuntimeError("500 INTERNAL. Internal error encountered.")
+            return super().list(config=config)
+
+    client = FakeClient()
+    client.file_search_stores = FlakyStores()
+    manager = FileSearchManager(client, retry_delay_seconds=0)
+
+    stores = manager.list_stores()
+
+    assert client.file_search_stores.list_attempts == 2
+    assert stores[0].name == "fileSearchStores/store-1"
+
+
 def test_wait_for_operation_timeout_includes_pending_operation():
     client = FakeClient()
     manager = FileSearchManager(client)

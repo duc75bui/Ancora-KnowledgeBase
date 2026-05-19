@@ -13,10 +13,21 @@ from dotenv import load_dotenv
 FILE_SEARCH_EMBEDDING_MODEL = "models/gemini-embedding-2"
 DEFAULT_MODEL = "gemini-3-flash-preview"
 TEMP_UPLOAD_DIR = Path(".tmp_uploads")
-APP_VERSION = "2.24"
+APP_VERSION = "2.25"
 APP_NAME = f"ancoraDocs KnowledgeBase v{APP_VERSION}"
 APP_CONFIG_DIR = Path(".app_config")
 LOCAL_SECRETS_PATH = APP_CONFIG_DIR / "secrets.json"
+TRANSIENT_API_ERROR_MARKERS = (
+    "500 INTERNAL",
+    "503 SERVICE_UNAVAILABLE",
+    "503 UNAVAILABLE",
+    "INTERNAL ERROR ENCOUNTERED",
+    "SERVICE UNAVAILABLE",
+    "DEADLINE_EXCEEDED",
+    "DEADLINE EXCEEDED",
+    "FAILED TO COUNT TOKENS",
+    "UPLOAD HAS ALREADY BEEN TERMINATED",
+)
 
 SUPPORTED_FILE_SEARCH_MODELS: dict[str, str] = {
     "gemini-3.1-pro-preview": "Gemini 3.1 Pro Preview",
@@ -131,6 +142,11 @@ def format_api_error(message: object, secrets: Iterable[str | None] = ()) -> str
         )
 
     return sanitized
+
+
+def is_transient_api_error(message: object) -> bool:
+    text = str(message).upper()
+    return any(marker in text for marker in TRANSIENT_API_ERROR_MARKERS)
 
 
 def _is_api_key_service_blocked(message: str) -> bool:

@@ -7,7 +7,11 @@ from typing import Any, Callable, Iterable
 from google.genai import types
 
 from .citation_parser import to_plain_data
-from .config import FILE_SEARCH_EMBEDDING_MODEL, format_api_error
+from .config import FILE_SEARCH_EMBEDDING_MODEL, format_api_error, is_transient_api_error
+
+
+DEFAULT_TRANSIENT_RETRY_ATTEMPTS = 3
+DEFAULT_TRANSIENT_RETRY_DELAY_SECONDS = 2.0
 
 
 class GeminiAPIError(RuntimeError):
@@ -40,9 +44,17 @@ class OperationStatus:
 
 
 class FileSearchManager:
-    def __init__(self, client: Any, secrets: Iterable[str | None] = ()):
+    def __init__(
+        self,
+        client: Any,
+        secrets: Iterable[str | None] = (),
+        retry_attempts: int = DEFAULT_TRANSIENT_RETRY_ATTEMPTS,
+        retry_delay_seconds: float = DEFAULT_TRANSIENT_RETRY_DELAY_SECONDS,
+    ):
         self.client = client
         self.secrets = tuple(secrets)
+        self.retry_attempts = max(1, retry_attempts)
+        self.retry_delay_seconds = max(0.0, retry_delay_seconds)
 
     def create_store(
         self,
@@ -156,12 +168,18 @@ class FileSearchManager:
         return current
 
     def _call(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
-        try:
-            return func(*args, **kwargs)
-        except GeminiAPIError:
-            raise
-        except Exception as exc:
-            raise GeminiAPIError(format_api_error(exc, self.secrets)) from None
+        for attempt in range(1, self.retry_attempts + 1):
+            try:
+                return func(*args, **kwargs)
+            except GeminiAPIError:
+                raise
+            except Exception as exc:
+                message = format_api_error(exc, self.secrets)
+                if not is_transient_api_error(message) or attempt >= self.retry_attempts:
+                    raise GeminiAPIError(message) from None
+                time.sleep(self.retry_delay_seconds * (2 ** (attempt - 1)))
+
+        raise GeminiAPIError("Unknown Gemini API error.")
 
 
 def operation_status(operation: Any) -> OperationStatus:

@@ -1,4 +1,4 @@
-# ancoraDocs KnowledgeBase v2.24 Deployment Guide
+# ancoraDocs KnowledgeBase v2.25 Deployment Guide
 
 This guide is for deploying the local Streamlit app on a Windows server or internal workstation.
 
@@ -262,6 +262,12 @@ Upload shows `File Search operation timed out before completion`:
 - Use Upload > Pending import operations to refresh the saved Google operation status, or use Documents > List documents later to verify whether the import completed.
 - The app stops the remaining selected uploads after a timeout so the admin can decide whether to wait, check status, or retry.
 - For larger or image-heavy files, use the default two-step upload method: standard Files API upload followed by File Search import.
+
+Upload shows `500 INTERNAL` or `503 SERVICE_UNAVAILABLE`:
+
+- These are Google server-side upload/import failures, not local validation failures.
+- The app retries transient upload/import failures before showing the error.
+- If Google returns the error before returning an operation name, there is no pending File Search operation for the app to refresh. Retry later, try the alternate upload method, or split/export the document if the same source keeps failing.
 
 DOCX upload returns MIME type errors:
 
